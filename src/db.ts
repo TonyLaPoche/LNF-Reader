@@ -77,6 +77,30 @@ export function writeProgress(id: string, progress: ReadingProgress): void {
   localStorage.setItem(progressKey(id), JSON.stringify(progress));
 }
 
+export async function markBookRead(id: string): Promise<void> {
+  const book = await getBook(id);
+  if (!book) return;
+  const progress: ReadingProgress = {
+    cfi: book.progress?.cfi ?? "",
+    page: book.progress?.page ?? 0,
+    percentage: 1,
+    chapter: "Lu",
+    updatedAt: Date.now(),
+    finished: true,
+  };
+  writeProgress(id, progress);
+  book.progress = progress;
+  await saveBook(book);
+}
+
+export async function markBookUnread(id: string): Promise<void> {
+  localStorage.removeItem(progressKey(id));
+  const book = await getBook(id);
+  if (!book) return;
+  book.progress = null;
+  await saveBook(book);
+}
+
 export async function updateProgress(id: string, progress: ReadingProgress): Promise<void> {
   writeProgress(id, progress);
   const book = await getBook(id);

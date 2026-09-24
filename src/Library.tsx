@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { deleteBook, listBooks } from "./db";
+import { deleteBook, listBooks, markBookRead, markBookUnread } from "./db";
 import { isInstalled, isIos, promptInstall, subscribeInstall } from "./install";
 import { bookSize, formatSize, groupSeries, volumeLabel, type SeriesGroup } from "./series";
 import type { BookSummary } from "./types";
@@ -89,6 +89,12 @@ export function Library({ seriesKey, onOpenSeries, onBack, onOpen }: LibraryProp
     }
   }
 
+  async function onRead(book: BookSummary, read: boolean) {
+    if (read) await markBookRead(book.id);
+    else await markBookUnread(book.id);
+    await refresh();
+  }
+
   async function onDelete(book: BookSummary) {
     const confirmed = window.confirm(`Retirer « ${volumeLabel(book)} » ?`);
     if (!confirmed) return;
@@ -160,6 +166,7 @@ export function Library({ seriesKey, onOpenSeries, onBack, onOpen }: LibraryProp
           group={opened}
           covers={covers}
           onOpen={onOpen}
+          onRead={(book, read) => void onRead(book, read)}
           onDelete={(book) => void onDelete(book)}
           onDeleteSeries={() => void onDeleteSeries(opened)}
         />
@@ -198,24 +205,71 @@ export function Library({ seriesKey, onOpenSeries, onBack, onOpen }: LibraryProp
   );
 }
 
+function DotsIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="6" cy="12" r="1.6" />
+      <circle cx="12" cy="12" r="1.6" />
+      <circle cx="18" cy="12" r="1.6" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M5 12.5 9.2 17 19 7" />
+    </svg>
+  );
+}
+
+function CircleIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="12" cy="12" r="7" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M5 8h14M9 8V6h6v2M8 8l1 11h6l1-11" />
+    </svg>
+  );
+}
+
 function VolumeList({
   group,
   covers,
   onOpen,
+  onRead,
   onDelete,
   onDeleteSeries,
 }: {
   group: SeriesGroup;
   covers: Record<string, string>;
   onOpen: (book: BookSummary) => void;
+  onRead: (book: BookSummary, read: boolean) => void;
   onDelete: (book: BookSummary) => void;
   onDeleteSeries: () => void;
 }) {
+  const [menu, setMenu] = useState<{ id: string; top: number; left: number; up: boolean } | null>(null);
+  const opened = group.volumes.find((book) => book.id === menu?.id) ?? null;
+
+  useEffect(() => {
+    if (!menu) return;
+    const close = () => setMenu(null);
+    window.addEventListener("resize", close);
+    return () => window.removeEventListener("resize", close);
+  }, [menu]);
+
   return (
     <>
       <ul className="book-list volume-list">
         {group.volumes.map((book) => {
-          const percent = Math.round((book.progress?.percentage ?? 0) * 100);
+          const read = book.progress?.finished === true;
+          const percent = read ? 100 : Math.round((book.progress?.percentage ?? 0) * 100);
           const size = formatSize(bookSize(book));
           return (
             <li key={book.id} className="book-card volume-card">
@@ -232,20 +286,63 @@ function VolumeList({
                   <em>{book.fileName}</em>
                   <small>
                     {size}
-                    {book.progress ? ` · ${percent}%` : " · Pas commencé"}
+                    {read ? " · Lu" : book.progress ? ` · ${percent}%` : " · Pas commencé"}
                   </small>
                   <span className="progress">
                     <span style={{ width: `${percent}%` }} />
                   </span>
                 </span>
               </button>
-              <button className="icon-button" onClick={() => onDelete(book)} aria-label="Retirer le volume">
-                ×
+              <button
+                className="icon-button"
+                aria-label="Options du chapitre"
+                aria-expanded={menu?.id === book.id}
+                onClick={(event) => {
+                  const rect = event.currentTarget.getBoundingClientRect();
+                  const openUp = rect.bottom + 120 > window.innerHeight;
+                  setMenu((current) =>
+                    current?.id === book.id
+                      ? null
+                      : { id: book.id, top: openUp ? rect.top - 6 : rect.bottom + 6, left: rect.right, up: openUp },
+                  );
+                }}
+              >
+                <DotsIcon />
               </button>
             </li>
           );
         })}
       </ul>
+      {menu && opened ? (
+        <>
+          <button className="menu-backdrop" aria-label="Fermer le menu" onClick={() => setMenu(null)} />
+          <div className={`volume-menu${menu.up ? " up" : ""}`} style={{ top: menu.top, left: menu.left }} role="menu">
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                onRead(opened, !opened.progress?.finished);
+                setMenu(null);
+              }}
+            >
+              {opened.progress?.finished ? <CircleIcon /> : <CheckIcon />}
+              {opened.progress?.finished ? "Non lu" : "Déjà lu"}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="danger"
+              onClick={() => {
+                setMenu(null);
+                onDelete(opened);
+              }}
+            >
+              <TrashIcon />
+              Supprimer
+            </button>
+          </div>
+        </>
+      ) : null}
       <button className="text-button" onClick={onDeleteSeries}>
         Retirer ce roman
       </button>

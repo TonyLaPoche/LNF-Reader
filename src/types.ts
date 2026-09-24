@@ -6,6 +6,7 @@ export type ReadingProgress = {
   percentage: number;
   chapter: string;
   updatedAt: number;
+  finished?: boolean;
 };
 
 export type BookRecord = {
