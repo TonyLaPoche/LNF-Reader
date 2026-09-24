@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { deleteBook, listBooks } from "./db";
+import { isInstalled, isIos, promptInstall, subscribeInstall } from "./install";
 import { bookSize, formatSize, groupSeries, volumeLabel, type SeriesGroup } from "./series";
 import type { BookSummary } from "./types";
 
@@ -14,6 +15,8 @@ export function Library({ onOpen }: LibraryProps) {
   const [busy, setBusy] = useState(true);
   const [importing, setImporting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [installed, setInstalled] = useState(() => isInstalled());
+  const [installHint, setInstallHint] = useState<string | null>(null);
 
   const series = useMemo(() => groupSeries(books), [books]);
   const opened = series.find((group) => group.key === seriesKey) ?? null;
@@ -30,6 +33,23 @@ export function Library({ onOpen }: LibraryProps) {
       return urls;
     });
     setBusy(false);
+  }
+
+  useEffect(() => subscribeInstall(() => setInstalled(isInstalled())), []);
+
+  async function onInstall() {
+    const outcome = await promptInstall();
+    if (outcome === "accepted") {
+      setInstalled(true);
+      setInstallHint(null);
+      return;
+    }
+    if (outcome === "dismissed") return;
+    setInstallHint(
+      isIos()
+        ? "Dans Safari : Partager, puis « Sur l’écran d’accueil »."
+        : "Ouvre le menu du navigateur, puis « Installer l’application ».",
+    );
   }
 
   useEffect(() => {
@@ -96,6 +116,11 @@ export function Library({ onOpen }: LibraryProps) {
               ←
             </button>
           ) : null}
+          {installed ? null : (
+            <button className="button" type="button" onClick={() => void onInstall()}>
+              Installer
+            </button>
+          )}
           <label className="button primary">
             Importer
             <input
@@ -112,6 +137,7 @@ export function Library({ onOpen }: LibraryProps) {
         </div>
       </header>
 
+      {installHint ? <p className="banner">{installHint}</p> : null}
       {importing ? <p className="banner">Import {importing}</p> : null}
       {error ? <p className="banner">{error}</p> : null}
       {busy ? <p className="muted">Chargement…</p> : null}
