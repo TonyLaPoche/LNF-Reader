@@ -70,12 +70,6 @@ export function Reader({ bookId, onBack }: ReaderProps) {
       });
       renditionRef.current = rendition;
       applyLook(rendition, readPrefs());
-      rendition.hooks.content.register((contents: { document: Document }) => {
-        const style = contents.document.createElement("style");
-        style.textContent =
-          "html,body{overflow:hidden!important;height:100%!important;touch-action:none!important;overscroll-behavior:none!important;}";
-        contents.document.head.appendChild(style);
-      });
 
       const saved = readProgress(bookId) ?? record.progress;
       rendition.on("relocated", (location: Relocated) => {
@@ -100,6 +94,8 @@ export function Reader({ bookId, onBack }: ReaderProps) {
       });
 
       await rendition.display(saved?.cfi);
+      const box = stage.getBoundingClientRect();
+      rendition.resize(Math.max(1, Math.floor(box.width)), Math.max(1, Math.floor(box.height)));
       if (!cancelled) setReady(true);
 
       void book.locations.generate(1600).then(() => {
