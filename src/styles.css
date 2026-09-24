@@ -295,6 +295,7 @@ h1 { font-size: clamp(1.45rem, 7vw, 1.8rem); }
 .pdf-stage canvas {
   display: block;
   max-width: none;
+  transform-origin: center top;
 }
 
 .reader-status {

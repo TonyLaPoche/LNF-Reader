@@ -3,7 +3,7 @@ import ePub, { type Book, type Rendition } from "epubjs";
 import { getBook, readProgress, updateProgress } from "./db";
 import { readPrefs, writeLastBook, writePrefs } from "./prefs";
 import { isEnglishLanguage, readChapterParagraphs, spineHrefs } from "./chapterText";
-import { trackpadSwipe, trackVerticalSwipe } from "./swipe";
+import { trackpadSwipe, trackPinch, trackVerticalSwipe } from "./swipe";
 import { MODEL_SIZE, TRANSLATION_NOTE, translateParagraphs } from "./translate";
 import { readTranslation, translationId, writeTranslation } from "./translationStore";
 import type { ReaderPrefs } from "./types";
@@ -58,6 +58,7 @@ export function Reader({ bookId, onBack }: ReaderProps) {
 
     let cancelled = false;
     let saveTimer = 0;
+    const imageZoom = { value: 1 };
 
     async function open() {
       const record = await getBook(bookId);
@@ -98,6 +99,11 @@ export function Reader({ bookId, onBack }: ReaderProps) {
         setChapter(label);
         setPercentage(nextPercentage);
         hrefRef.current = href.split("#")[0];
+        if (stage && !viewIsImage(rendition)) {
+          imageZoom.value = 1;
+          stage.style.zoom = "";
+          stage.parentElement?.style.setProperty("overflow", "hidden");
+        }
         if (frenchModeRef.current) {
           void readTranslation(bookId, href).then((saved) => {
             setFrench(saved?.paragraphs ?? null);
@@ -148,11 +154,28 @@ export function Reader({ bookId, onBack }: ReaderProps) {
     const turnNext = () => turnRef.current("next");
     const stopSwipe = gesture ? trackVerticalSwipe(gesture, turnPrev, turnNext) : undefined;
     const stopTrackpad = gesture ? trackpadSwipe(gesture, turnPrev, turnNext) : undefined;
+    const stopPinch = gesture
+      ? trackPinch(
+          gesture,
+          (ratio, done) => {
+            const stageNode = stageRef.current;
+            if (!stageNode) return;
+            const nextZoom = Math.min(4, Math.max(1, imageZoom.value * ratio));
+            stageNode.style.zoom = String(done ? nextZoom : imageZoom.value * ratio);
+            if (stageNode.parentElement) {
+              stageNode.parentElement.style.overflow = nextZoom > 1.02 ? "auto" : "hidden";
+            }
+            if (done) imageZoom.value = nextZoom;
+          },
+          () => viewIsImage(renditionRef.current),
+        )
+      : undefined;
 
     return () => {
       stopJobRef.current = true;
       stopSwipe?.();
       stopTrackpad?.();
+      stopPinch?.();
       cancelled = true;
       window.clearTimeout(saveTimer);
       window.removeEventListener("resize", onResize);
@@ -432,6 +455,18 @@ function flattenToc(items: NavItem[] | undefined, acc: TocItem[] = []): TocItem[
     if (item.subitems?.length) flattenToc(item.subitems, acc);
   }
   return acc;
+}
+
+function viewIsImage(rendition: Rendition | null): boolean {
+  const contents = (rendition as { getContents?: () => Array<{ document?: Document }> } | null)?.getContents?.() ?? [];
+  return contents.some((content) => {
+    const body = content.document?.body;
+    if (!body) return false;
+    const text = body.innerText?.replace(/\s+/g, "") ?? "";
+    const images = [...body.querySelectorAll("img, svg")];
+    const large = images.some((image) => image.getBoundingClientRect().height > 180);
+    return large && text.length < 240;
+  });
 }
 
 function chapterLabel(items: TocItem[], href: string): string {

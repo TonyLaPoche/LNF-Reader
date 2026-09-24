@@ -11,6 +11,10 @@ export function trackVerticalSwipe(
   let tracking = false;
 
   const start = (event: Event) => {
+    if (touchCount(event) > 1) {
+      tracking = false;
+      return;
+    }
     const touch = touchFrom(event, "changedTouches");
     if (!touch) return;
     startX = touch.clientX;
@@ -19,6 +23,10 @@ export function trackVerticalSwipe(
   };
 
   const move = (event: Event) => {
+    if (touchCount(event) > 1) {
+      tracking = false;
+      return;
+    }
     if (!tracking) return;
     const touch = touchFrom(event, "touches");
     if (!touch) return;
@@ -93,6 +101,66 @@ export function trackpadSwipe(
     window.clearTimeout(quietTimer);
     target.removeEventListener("wheel", onWheel);
   };
+}
+
+export function trackPinch(
+  target: HTMLElement,
+  onRatio: (ratio: number, done: boolean) => void,
+  allow: () => boolean = () => true,
+): () => void {
+  let startDist = 0;
+  let lastRatio = 1;
+  let pinching = false;
+
+  const distance = (touches: TouchList) => {
+    const a = touches[0];
+    const b = touches[1];
+    if (!a || !b) return 0;
+    return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+  };
+
+  const start = (event: Event) => {
+    const touches = (event as TouchEvent).touches;
+    if (!touches || touches.length !== 2 || !allow()) {
+      pinching = false;
+      return;
+    }
+    startDist = distance(touches);
+    lastRatio = 1;
+    pinching = startDist > 8;
+  };
+
+  const move = (event: Event) => {
+    const touches = (event as TouchEvent).touches;
+    if (!pinching || !touches || touches.length < 2) return;
+    event.preventDefault();
+    lastRatio = distance(touches) / startDist;
+    onRatio(lastRatio, false);
+  };
+
+  const end = (event: Event) => {
+    if (!pinching) return;
+    const touches = (event as TouchEvent).touches;
+    if (touches && touches.length >= 2) return;
+    pinching = false;
+    onRatio(lastRatio, true);
+    lastRatio = 1;
+  };
+
+  target.addEventListener("touchstart", start, { passive: true });
+  target.addEventListener("touchmove", move, { passive: false });
+  target.addEventListener("touchend", end);
+  target.addEventListener("touchcancel", end);
+  return () => {
+    target.removeEventListener("touchstart", start);
+    target.removeEventListener("touchmove", move);
+    target.removeEventListener("touchend", end);
+    target.removeEventListener("touchcancel", end);
+  };
+}
+
+function touchCount(event: Event): number {
+  return (event as TouchEvent).touches?.length ?? 0;
 }
 
 function touchFrom(event: Event, list: "touches" | "changedTouches"): Touch | null {
