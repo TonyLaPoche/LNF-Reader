@@ -287,15 +287,16 @@ h1 { font-size: clamp(1.45rem, 7vw, 1.8rem); }
 .offer-actions .button { width: 100%; }
 
 .pdf-stage {
-  overflow: auto;
+  overflow: hidden;
   display: flex;
   justify-content: center;
+  touch-action: none;
 }
 
 .pdf-stage canvas {
   display: block;
   max-width: none;
-  transform-origin: center top;
+  transform-origin: 0 0;
 }
 
 .reader-status {

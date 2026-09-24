@@ -3,7 +3,7 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import { getBook, readProgress, updateProgress } from "./db";
 import { openPdf } from "./pdf";
 import { readPrefs, writeLastBook, writePrefs } from "./prefs";
-import { trackpadSwipe, trackPinch, trackVerticalSwipe } from "./swipe";
+import { applyImageView, trackpadSwipe, trackVerticalSwipe, trackZoomPan, type ImageView } from "./swipe";
 import type { ReaderPrefs } from "./types";
 
 type PdfReaderProps = {
@@ -22,9 +22,8 @@ export function PdfReader({ bookId, onBack }: PdfReaderProps) {
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const pageRef = useRef(page);
-  const scaleRef = useRef(prefs.fontScale);
+  const viewRef = useRef<ImageView>({ scale: 1, x: 0, y: 0 });
   pageRef.current = page;
-  scaleRef.current = prefs.fontScale;
 
   useEffect(() => {
     writeLastBook(bookId, "pdf");
@@ -80,6 +79,8 @@ export function PdfReader({ bookId, onBack }: PdfReaderProps) {
       canvas.height = Math.floor(viewport.height);
       canvas.style.width = `${Math.floor(viewport.width)}px`;
       canvas.style.height = `${Math.floor(viewport.height)}px`;
+      viewRef.current = { scale: 1, x: 0, y: 0 };
+      applyImageView(canvas, viewRef.current);
       await pdfPage.render({ canvas, canvasContext: context, viewport }).promise;
     }
 
@@ -117,25 +118,30 @@ export function PdfReader({ bookId, onBack }: PdfReaderProps) {
         return frame.scrollTop + frame.clientHeight >= frame.scrollHeight - 8;
       }
       return frame.scrollTop <= 8;
-    });
+    }, () => viewRef.current.scale <= 1.02);
     const stopTrackpad = trackpadSwipe(frame, prev, next);
-    let pinchBase = 0;
-    const stopPinch = trackPinch(frame, (ratio, done) => {
-      const canvas = canvasRef.current;
-      if (pinchBase === 0) pinchBase = scaleRef.current;
-      const nextScale = clampScale(pinchBase * ratio);
-      if (!done) {
-        if (canvas) canvas.style.transform = `scale(${nextScale / pinchBase})`;
-        return;
-      }
-      pinchBase = 0;
-      if (canvas) canvas.style.transform = "";
-      setPrefs((current) => ({ ...current, fontScale: nextScale }));
-    });
+    const stopZoom = trackZoomPan(
+      frame,
+      () => viewRef.current,
+      (view) => {
+        viewRef.current = view;
+        const canvas = canvasRef.current;
+        if (canvas) applyImageView(canvas, view);
+      },
+      () => {
+        const canvas = canvasRef.current;
+        return {
+          width: canvas?.clientWidth ?? frame.clientWidth,
+          height: canvas?.clientHeight ?? frame.clientHeight,
+          viewWidth: frame.clientWidth,
+          viewHeight: frame.clientHeight,
+        };
+      },
+    );
     return () => {
       stopSwipe();
       stopTrackpad();
-      stopPinch();
+      stopZoom();
     };
   }, [ready]);
 
@@ -218,6 +224,3 @@ function clampPage(page: number, total: number): number {
   return Math.min(total, Math.max(1, page));
 }
 
-function clampScale(scale: number): number {
-  return Math.min(400, Math.max(80, Math.round(scale)));
-}

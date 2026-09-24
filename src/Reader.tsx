@@ -3,7 +3,7 @@ import ePub, { type Book, type Rendition } from "epubjs";
 import { getBook, readProgress, updateProgress } from "./db";
 import { readPrefs, writeLastBook, writePrefs } from "./prefs";
 import { isEnglishLanguage, readChapterParagraphs, spineHrefs } from "./chapterText";
-import { trackpadSwipe, trackPinch, trackVerticalSwipe } from "./swipe";
+import { applyImageView, trackpadSwipe, trackVerticalSwipe, trackZoomPan, type ImageView } from "./swipe";
 import { MODEL_SIZE, TRANSLATION_NOTE, translateParagraphs } from "./translate";
 import { readTranslation, translationId, writeTranslation } from "./translationStore";
 import type { ReaderPrefs } from "./types";
@@ -58,7 +58,7 @@ export function Reader({ bookId, onBack }: ReaderProps) {
 
     let cancelled = false;
     let saveTimer = 0;
-    const imageZoom = { value: 1 };
+    const imageZoom = { value: { scale: 1, x: 0, y: 0 } satisfies ImageView };
 
     async function open() {
       const record = await getBook(bookId);
@@ -100,9 +100,8 @@ export function Reader({ bookId, onBack }: ReaderProps) {
         setPercentage(nextPercentage);
         hrefRef.current = href.split("#")[0];
         if (stage && !viewIsImage(rendition)) {
-          imageZoom.value = 1;
-          stage.style.zoom = "";
-          stage.parentElement?.style.setProperty("overflow", "hidden");
+          imageZoom.value = { scale: 1, x: 0, y: 0 };
+          applyImageView(stage, imageZoom.value);
         }
         if (frenchModeRef.current) {
           void readTranslation(bookId, href).then((saved) => {
@@ -152,22 +151,30 @@ export function Reader({ bookId, onBack }: ReaderProps) {
     const gesture = gestureRef.current;
     const turnPrev = () => turnRef.current("prev");
     const turnNext = () => turnRef.current("next");
-    const stopSwipe = gesture ? trackVerticalSwipe(gesture, turnPrev, turnNext) : undefined;
+    const stopSwipe = gesture
+      ? trackVerticalSwipe(gesture, turnPrev, turnNext, () => true, () => imageZoom.value.scale <= 1.02)
+      : undefined;
     const stopTrackpad = gesture ? trackpadSwipe(gesture, turnPrev, turnNext) : undefined;
-    const stopPinch = gesture
-      ? trackPinch(
+    const stopZoom = gesture
+      ? trackZoomPan(
           gesture,
-          (ratio, done) => {
+          () => imageZoom.value,
+          (view) => {
+            imageZoom.value = view;
             const stageNode = stageRef.current;
-            if (!stageNode) return;
-            const nextZoom = Math.min(4, Math.max(1, imageZoom.value * ratio));
-            stageNode.style.zoom = String(done ? nextZoom : imageZoom.value * ratio);
-            if (stageNode.parentElement) {
-              stageNode.parentElement.style.overflow = nextZoom > 1.02 ? "auto" : "hidden";
-            }
-            if (done) imageZoom.value = nextZoom;
+            if (stageNode) applyImageView(stageNode, view);
           },
-          () => viewIsImage(renditionRef.current),
+          () => {
+            const stageNode = stageRef.current;
+            const wrap = stageNode?.parentElement;
+            return {
+              width: stageNode?.clientWidth ?? 1,
+              height: stageNode?.clientHeight ?? 1,
+              viewWidth: wrap?.clientWidth ?? 1,
+              viewHeight: wrap?.clientHeight ?? 1,
+            };
+          },
+          () => viewIsImage(renditionRef.current) || imageZoom.value.scale > 1.02,
         )
       : undefined;
 
@@ -175,7 +182,7 @@ export function Reader({ bookId, onBack }: ReaderProps) {
       stopJobRef.current = true;
       stopSwipe?.();
       stopTrackpad?.();
-      stopPinch?.();
+      stopZoom?.();
       cancelled = true;
       window.clearTimeout(saveTimer);
       window.removeEventListener("resize", onResize);

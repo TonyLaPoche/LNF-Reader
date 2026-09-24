@@ -5,6 +5,7 @@ export function trackVerticalSwipe(
   onPrev: () => void,
   onNext: () => void,
   canTurn: (direction: Direction) => boolean = () => true,
+  allowTurn: () => boolean = () => true,
 ): () => void {
   let startX = 0;
   let startY = 0;
@@ -34,6 +35,7 @@ export function trackVerticalSwipe(
     const dy = touch.clientY - startY;
     const horizontal = Math.abs(dx) > Math.abs(dy);
     const direction: Direction = horizontal ? (dx < 0 ? "next" : "prev") : dy < 0 ? "next" : "prev";
+    if (!allowTurn()) return;
     const turning = horizontal || canTurn(direction);
     if (turning && (horizontal ? Math.abs(dx) : Math.abs(dy)) > 18) event.preventDefault();
   };
@@ -47,7 +49,7 @@ export function trackVerticalSwipe(
     const dy = touch.clientY - startY;
     const horizontal = Math.abs(dx) > Math.abs(dy);
     const distance = horizontal ? Math.abs(dx) : Math.abs(dy);
-    if (distance < 56) return;
+    if (!allowTurn() || distance < 56) return;
     const direction: Direction = horizontal ? (dx < 0 ? "next" : "prev") : dy < 0 ? "next" : "prev";
     if (!horizontal && !canTurn(direction)) return;
     if (direction === "next") onNext();
@@ -101,6 +103,118 @@ export function trackpadSwipe(
     window.clearTimeout(quietTimer);
     target.removeEventListener("wheel", onWheel);
   };
+}
+
+export type ImageView = { scale: number; x: number; y: number };
+
+export function trackZoomPan(
+  target: HTMLElement,
+  getView: () => ImageView,
+  setView: (view: ImageView) => void,
+  metrics: () => { width: number; height: number; viewWidth: number; viewHeight: number },
+  allow: () => boolean = () => true,
+): () => void {
+  let mode: "none" | "pending" | "pan" | "pinch" = "none";
+  let startX = 0;
+  let startY = 0;
+  let origin: ImageView = { scale: 1, x: 0, y: 0 };
+  let startDist = 0;
+
+  const clamp = (next: ImageView): ImageView => {
+    const { width, height, viewWidth, viewHeight } = metrics();
+    const scale = Math.min(4, Math.max(1, next.scale));
+    const minX = Math.min(0, viewWidth - width * scale);
+    const minY = Math.min(0, viewHeight - height * scale);
+    return {
+      scale,
+      x: Math.min(0, Math.max(minX, next.x)),
+      y: Math.min(0, Math.max(minY, next.y)),
+    };
+  };
+
+  const start = (event: Event) => {
+    const touches = (event as TouchEvent).touches;
+    if (!touches || !allow()) {
+      mode = "none";
+      return;
+    }
+    origin = getView();
+    if (touches.length === 2) {
+      startDist = Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
+      startX = (touches[0].clientX + touches[1].clientX) / 2;
+      startY = (touches[0].clientY + touches[1].clientY) / 2;
+      mode = startDist > 8 ? "pinch" : "none";
+      return;
+    }
+    if (touches.length === 1) {
+      startX = touches[0].clientX;
+      startY = touches[0].clientY;
+      mode = "pending";
+    }
+  };
+
+  const move = (event: Event) => {
+    const touches = (event as TouchEvent).touches;
+    if (!touches || mode === "none") return;
+    const bounds = target.getBoundingClientRect();
+    if (mode === "pinch" && touches.length >= 2) {
+      event.preventDefault();
+      const dist = Math.hypot(touches[0].clientX - touches[1].clientX, touches[0].clientY - touches[1].clientY);
+      const midX = (touches[0].clientX + touches[1].clientX) / 2 - bounds.left;
+      const midY = (touches[0].clientY + touches[1].clientY) / 2 - bounds.top;
+      const startMidX = startX - bounds.left;
+      const startMidY = startY - bounds.top;
+      const scale = Math.min(4, Math.max(1, origin.scale * (dist / startDist)));
+      const factor = scale / origin.scale;
+      setView(clamp({
+        scale,
+        x: midX - (startMidX - origin.x) * factor,
+        y: midY - (startMidY - origin.y) * factor,
+      }));
+      return;
+    }
+    if (mode === "pending" && touches.length === 1) {
+      const dx = touches[0].clientX - startX;
+      const dy = touches[0].clientY - startY;
+      if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+      const size = metrics();
+      const overflows = origin.scale > 1.02 || size.height * origin.scale > size.viewHeight + 4;
+      if (overflows && (origin.scale > 1.02 || Math.abs(dy) >= Math.abs(dx))) mode = "pan";
+      else mode = "none";
+    }
+    if (mode === "pan" && touches.length === 1) {
+      event.preventDefault();
+      setView(clamp({
+        scale: origin.scale,
+        x: origin.x + touches[0].clientX - startX,
+        y: origin.y + touches[0].clientY - startY,
+      }));
+    }
+  };
+
+  const end = (event: Event) => {
+    const touches = (event as TouchEvent).touches;
+    if (touches && touches.length > 0) return;
+    mode = "none";
+  };
+
+  target.addEventListener("touchstart", start, { passive: true });
+  target.addEventListener("touchmove", move, { passive: false });
+  target.addEventListener("touchend", end);
+  target.addEventListener("touchcancel", end);
+  return () => {
+    target.removeEventListener("touchstart", start);
+    target.removeEventListener("touchmove", move);
+    target.removeEventListener("touchend", end);
+    target.removeEventListener("touchcancel", end);
+  };
+}
+
+export function applyImageView(element: HTMLElement, view: ImageView): void {
+  element.style.transformOrigin = "0 0";
+  element.style.transform = view.scale === 1 && view.x === 0 && view.y === 0
+    ? ""
+    : `translate(${view.x}px, ${view.y}px) scale(${view.scale})`;
 }
 
 export function trackPinch(
