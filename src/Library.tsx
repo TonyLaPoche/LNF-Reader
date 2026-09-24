@@ -89,6 +89,15 @@ export function Library({ seriesKey, onOpenSeries, onBack, onOpen }: LibraryProp
     }
   }
 
+  async function onReadUpTo(book: BookSummary, volumes: BookSummary[]) {
+    const index = volumes.findIndex((item) => item.id === book.id);
+    const targets = index < 0 ? [book] : volumes.slice(0, index + 1);
+    for (const item of targets) {
+      if (!item.progress?.finished) await markBookRead(item.id);
+    }
+    await refresh();
+  }
+
   async function onRead(book: BookSummary, read: boolean) {
     if (read) await markBookRead(book.id);
     else await markBookUnread(book.id);
@@ -166,6 +175,7 @@ export function Library({ seriesKey, onOpenSeries, onBack, onOpen }: LibraryProp
           group={opened}
           covers={covers}
           onOpen={onOpen}
+          onReadUpTo={(book) => void onReadUpTo(book, opened?.volumes ?? [])}
           onRead={(book, read) => void onRead(book, read)}
           onDelete={(book) => void onDelete(book)}
           onDeleteSeries={() => void onDeleteSeries(opened)}
@@ -223,6 +233,15 @@ function CheckIcon() {
   );
 }
 
+function UpToIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M6 7h12M6 12h8M6 17h4" />
+      <path d="m15 15 3 2-3 2" />
+    </svg>
+  );
+}
+
 function CircleIcon() {
   return (
     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -244,12 +263,14 @@ function VolumeList({
   covers,
   onOpen,
   onRead,
+  onReadUpTo,
   onDelete,
   onDeleteSeries,
 }: {
   group: SeriesGroup;
   covers: Record<string, string>;
   onOpen: (book: BookSummary) => void;
+  onReadUpTo: (book: BookSummary) => void;
   onRead: (book: BookSummary, read: boolean) => void;
   onDelete: (book: BookSummary) => void;
   onDeleteSeries: () => void;
@@ -299,7 +320,7 @@ function VolumeList({
                 aria-expanded={menu?.id === book.id}
                 onClick={(event) => {
                   const rect = event.currentTarget.getBoundingClientRect();
-                  const openUp = rect.bottom + 120 > window.innerHeight;
+                  const openUp = rect.bottom + 168 > window.innerHeight;
                   setMenu((current) =>
                     current?.id === book.id
                       ? null
@@ -327,6 +348,17 @@ function VolumeList({
             >
               {opened.progress?.finished ? <CircleIcon /> : <CheckIcon />}
               {opened.progress?.finished ? "Non lu" : "Déjà lu"}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                onReadUpTo(opened);
+                setMenu(null);
+              }}
+            >
+              <UpToIcon />
+              Déjà lu jusqu’ici
             </button>
             <button
               type="button"
