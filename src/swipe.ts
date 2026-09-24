@@ -63,8 +63,8 @@ export function trackpadSwipe(
   onNext: () => void,
 ): () => void {
   let accum = 0;
-  let lockedUntil = 0;
-  let resetTimer = 0;
+  let consumed = false;
+  let quietTimer = 0;
 
   const onWheel = (event: Event) => {
     const wheel = event as WheelEvent;
@@ -74,15 +74,15 @@ export function trackpadSwipe(
     const dy = wheel.deltaY * scale;
     if (Math.abs(dx) <= Math.abs(dy) || Math.abs(dx) < 2) return;
     event.preventDefault();
-    if (Date.now() < lockedUntil) return;
-    accum += dx;
-    window.clearTimeout(resetTimer);
-    resetTimer = window.setTimeout(() => {
+    window.clearTimeout(quietTimer);
+    quietTimer = window.setTimeout(() => {
       accum = 0;
-    }, 160);
-    if (Math.abs(accum) < 48) return;
-    lockedUntil = Date.now() + 420;
-    window.clearTimeout(resetTimer);
+      consumed = false;
+    }, 280);
+    if (consumed) return;
+    accum += dx;
+    if (Math.abs(accum) < 40) return;
+    consumed = true;
     if (accum > 0) onNext();
     else onPrev();
     accum = 0;
@@ -90,7 +90,7 @@ export function trackpadSwipe(
 
   target.addEventListener("wheel", onWheel, { passive: false });
   return () => {
-    window.clearTimeout(resetTimer);
+    window.clearTimeout(quietTimer);
     target.removeEventListener("wheel", onWheel);
   };
 }
