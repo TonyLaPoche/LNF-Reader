@@ -58,6 +58,6 @@ export function trackVerticalSwipe(
 }
 
 function touchFrom(event: Event, list: "touches" | "changedTouches"): Touch | null {
-  if (!(event instanceof TouchEvent)) return null;
-  return event[list][0] ?? null;
+  const touches = (event as TouchEvent)[list];
+  return touches?.[0] ?? null;
 }

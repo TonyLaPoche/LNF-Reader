@@ -26,6 +26,7 @@ const THEMES: Record<ReaderPrefs["theme"], { body: Record<string, string> }> = {
 
 export function Reader({ bookId, onBack }: ReaderProps) {
   const stageRef = useRef<HTMLDivElement>(null);
+  const gestureRef = useRef<HTMLDivElement>(null);
   const renditionRef = useRef<Rendition | null>(null);
   const bookRef = useRef<Book | null>(null);
   const [title, setTitle] = useState("Lecture");
@@ -70,11 +71,10 @@ export function Reader({ bookId, onBack }: ReaderProps) {
       renditionRef.current = rendition;
       applyLook(rendition, readPrefs());
       rendition.hooks.content.register((contents: { document: Document }) => {
-        trackVerticalSwipe(
-          contents.document,
-          () => void rendition.prev(),
-          () => void rendition.next(),
-        );
+        const style = contents.document.createElement("style");
+        style.textContent =
+          "html,body{overflow:hidden!important;height:100%!important;touch-action:none!important;overscroll-behavior:none!important;}";
+        contents.document.head.appendChild(style);
       });
 
       const saved = readProgress(bookId) ?? record.progress;
@@ -125,8 +125,17 @@ export function Reader({ bookId, onBack }: ReaderProps) {
       rendition.resize(Math.floor(rect.width), Math.floor(rect.height));
     };
     window.addEventListener("resize", onResize);
+    const gesture = gestureRef.current;
+    const stopSwipe = gesture
+      ? trackVerticalSwipe(
+          gesture,
+          () => void renditionRef.current?.prev(),
+          () => void renditionRef.current?.next(),
+        )
+      : undefined;
 
     return () => {
+      stopSwipe?.();
       cancelled = true;
       window.clearTimeout(saveTimer);
       window.removeEventListener("resize", onResize);
@@ -164,16 +173,19 @@ export function Reader({ bookId, onBack }: ReaderProps) {
         </button>
       </header>
 
-      <div
-        className="stage"
-        ref={stageRef}
-        onClick={(event) => {
-          const bounds = event.currentTarget.getBoundingClientRect();
-          const x = event.clientX - bounds.left;
-          if (x < bounds.width * 0.28) turn("prev");
-          else if (x > bounds.width * 0.72) turn("next");
-        }}
-      />
+      <div className="stage-wrap">
+        <div className="stage" ref={stageRef} />
+        <div
+          className="gesture-layer"
+          ref={gestureRef}
+          onClick={(event) => {
+            const bounds = event.currentTarget.getBoundingClientRect();
+            const x = event.clientX - bounds.left;
+            if (x < bounds.width * 0.28) turn("prev");
+            else if (x > bounds.width * 0.72) turn("next");
+          }}
+        />
+      </div>
 
       {!ready && !error ? <p className="reader-status">Ouverture du roman…</p> : null}
       {error ? <p className="banner">{error}</p> : null}
