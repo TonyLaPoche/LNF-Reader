@@ -5,13 +5,15 @@ import { bookSize, formatSize, groupSeries, volumeLabel, type SeriesGroup } from
 import type { BookSummary } from "./types";
 
 type LibraryProps = {
+  seriesKey: string | null;
+  onOpenSeries: (key: string) => void;
+  onBack: () => void;
   onOpen: (book: BookSummary) => void;
 };
 
-export function Library({ onOpen }: LibraryProps) {
+export function Library({ seriesKey, onOpenSeries, onBack, onOpen }: LibraryProps) {
   const [books, setBooks] = useState<BookSummary[]>([]);
   const [covers, setCovers] = useState<Record<string, string>>({});
-  const [seriesKey, setSeriesKey] = useState<string | null>(null);
   const [busy, setBusy] = useState(true);
   const [importing, setImporting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -77,7 +79,7 @@ export function Library({ onOpen }: LibraryProps) {
       const imported = (await listBooks()).find((book) => book.id === lastId);
       if (imported) {
         const group = groupSeries([imported])[0];
-        setSeriesKey(group?.key ?? null);
+        if (group) onOpenSeries(group.key);
       }
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Import impossible.");
@@ -98,7 +100,7 @@ export function Library({ onOpen }: LibraryProps) {
     const confirmed = window.confirm(`Retirer les ${group.volumes.length} volumes de « ${group.title} » ?`);
     if (!confirmed) return;
     for (const book of group.volumes) await deleteBook(book.id);
-    setSeriesKey(null);
+    onBack();
     await refresh();
   }
 
@@ -112,7 +114,7 @@ export function Library({ onOpen }: LibraryProps) {
         </div>
         <div className="top-actions">
           {opened ? (
-            <button className="icon-button" onClick={() => setSeriesKey(null)} aria-label="Bibliothèque">
+            <button className="icon-button" onClick={onBack} aria-label="Bibliothèque">
               ←
             </button>
           ) : null}
@@ -169,7 +171,7 @@ export function Library({ onOpen }: LibraryProps) {
             const current = [...group.volumes].reverse().find((book) => book.progress);
             return (
               <li key={group.key} className="book-card">
-                <button className="book-open" onClick={() => setSeriesKey(group.key)}>
+                <button className="book-open" onClick={() => onOpenSeries(group.key)}>
                   <span className="cover">
                     {coverBook && covers[coverBook.id] ? (
                       <img src={covers[coverBook.id]} alt="" />

@@ -22,18 +22,21 @@ export function writePrefs(prefs: ReaderPrefs): void {
   localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
 }
 
-export function readLastBook(): { id: string; format: BookFormat } | null {
+export function readLastBook(): { id: string; format: BookFormat; seriesKey: string; series: string } | null {
   const raw = localStorage.getItem(LAST_BOOK_KEY);
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw) as { id?: string; format?: BookFormat };
+    const parsed = JSON.parse(raw) as { id?: string; format?: BookFormat; seriesKey?: string };
     if (!parsed.id || (parsed.format !== "epub" && parsed.format !== "pdf")) return null;
-    return { id: parsed.id, format: parsed.format };
+    const seriesKey = parsed.seriesKey ?? "";
+    return { id: parsed.id, format: parsed.format, seriesKey, series: seriesKey };
   } catch {
     return null;
   }
 }
 
-export function writeLastBook(id: string, format: BookFormat): void {
-  localStorage.setItem(LAST_BOOK_KEY, JSON.stringify({ id, format }));
+export function writeLastBook(id: string, format: BookFormat, seriesKey?: string): void {
+  const previous = readLastBook();
+  const kept = seriesKey ?? (previous?.id === id ? previous.seriesKey : "");
+  localStorage.setItem(LAST_BOOK_KEY, JSON.stringify({ id, format, seriesKey: kept }));
 }

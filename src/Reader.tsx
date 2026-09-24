@@ -295,7 +295,7 @@ export function Reader({ bookId, onBack }: ReaderProps) {
   return (
     <main className={`screen reader theme-${prefs.theme}`}>
       <header className="reader-bar">
-        <button className="icon-button" onClick={onBack} aria-label="Bibliothèque">
+        <button className="icon-button" onClick={onBack} aria-label="Chapitres">
           ←
         </button>
         <div className="reader-title">

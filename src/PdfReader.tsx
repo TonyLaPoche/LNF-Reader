@@ -150,7 +150,7 @@ export function PdfReader({ bookId, onBack }: PdfReaderProps) {
   return (
     <main className={`screen reader pdf-reader theme-${prefs.theme}`}>
       <header className="reader-bar">
-        <button className="icon-button" onClick={onBack} aria-label="Bibliothèque">
+        <button className="icon-button" onClick={onBack} aria-label="Chapitres">
           ←
         </button>
         <div className="reader-title">
