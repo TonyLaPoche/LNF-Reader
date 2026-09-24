@@ -1,6 +1,7 @@
 import ePub from "epubjs";
 import { getBook, saveBook } from "./db";
 import { openPdf } from "./pdf";
+import { parseRelease } from "./series";
 import type { BookFormat } from "./types";
 
 export async function importBook(file: File): Promise<string> {
@@ -11,6 +12,7 @@ export async function importBook(file: File): Promise<string> {
   const existing = await getBook(id);
   const meta =
     format === "epub" ? await readEpub(data, file.name) : await readPdf(data, file.name);
+  const release = parseRelease(file.name);
 
   await saveBook({
     id,
@@ -18,6 +20,9 @@ export async function importBook(file: File): Promise<string> {
     title: meta.title,
     author: meta.author,
     fileName: file.name,
+    series: release.series,
+    volume: release.volume,
+    sizeBytes: file.size,
     addedAt: existing?.addedAt ?? Date.now(),
     data,
     cover: meta.cover ?? existing?.cover ?? null,

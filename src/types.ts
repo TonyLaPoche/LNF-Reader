@@ -14,6 +14,9 @@ export type BookRecord = {
   title: string;
   author: string;
   fileName: string;
+  series: string;
+  volume: number | null;
+  sizeBytes: number;
   addedAt: number;
   data: ArrayBuffer;
   cover: Blob | null;

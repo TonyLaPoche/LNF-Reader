@@ -49,6 +49,8 @@ button, input {
 }
 
 .topbar { flex-wrap: wrap; align-items: flex-end; }
+.top-actions { display: flex; align-items: center; gap: 8px; }
+.series-sub { margin: 4px 0 0; }
 
 .eyebrow {
   margin: 0;
@@ -147,6 +149,30 @@ h1 { font-size: clamp(1.45rem, 7vw, 1.8rem); }
 .book-copy strong, .book-copy em { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .book-copy em { color: #b3a79b; font-style: normal; font-size: 0.92rem; }
 .book-copy small { color: #b3a79b; }
+
+.volume-card { align-items: center; }
+.cover-sm { width: 48px; height: 68px; }
+.file-mark {
+  width: 52px;
+  height: 64px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 10px;
+  background: #d9def7;
+  color: #24315f;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+.volume-list { margin-bottom: 12px; }
+.text-button {
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  background: transparent;
+  color: #e7a394;
+  margin-bottom: 24px;
+}
 .format {
   width: fit-content;
   font-size: 0.68rem;
