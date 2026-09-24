@@ -57,6 +57,44 @@ export function trackVerticalSwipe(
   };
 }
 
+export function trackpadSwipe(
+  target: HTMLElement,
+  onPrev: () => void,
+  onNext: () => void,
+): () => void {
+  let accum = 0;
+  let lockedUntil = 0;
+  let resetTimer = 0;
+
+  const onWheel = (event: Event) => {
+    const wheel = event as WheelEvent;
+    if (wheel.ctrlKey) return;
+    const scale = wheel.deltaMode === 1 ? 16 : wheel.deltaMode === 2 ? window.innerWidth : 1;
+    const dx = wheel.deltaX * scale;
+    const dy = wheel.deltaY * scale;
+    if (Math.abs(dx) <= Math.abs(dy) || Math.abs(dx) < 2) return;
+    event.preventDefault();
+    if (Date.now() < lockedUntil) return;
+    accum += dx;
+    window.clearTimeout(resetTimer);
+    resetTimer = window.setTimeout(() => {
+      accum = 0;
+    }, 160);
+    if (Math.abs(accum) < 48) return;
+    lockedUntil = Date.now() + 420;
+    window.clearTimeout(resetTimer);
+    if (accum > 0) onNext();
+    else onPrev();
+    accum = 0;
+  };
+
+  target.addEventListener("wheel", onWheel, { passive: false });
+  return () => {
+    window.clearTimeout(resetTimer);
+    target.removeEventListener("wheel", onWheel);
+  };
+}
+
 function touchFrom(event: Event, list: "touches" | "changedTouches"): Touch | null {
   const touches = (event as TouchEvent)[list];
   return touches?.[0] ?? null;

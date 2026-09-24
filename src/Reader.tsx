@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import ePub, { type Book, type Rendition } from "epubjs";
 import { getBook, readProgress, updateProgress } from "./db";
 import { readPrefs, writeLastBook, writePrefs } from "./prefs";
-import { trackVerticalSwipe } from "./swipe";
+import { trackpadSwipe, trackVerticalSwipe } from "./swipe";
 import type { ReaderPrefs } from "./types";
 
 type TocItem = { label: string; href: string };
@@ -122,16 +122,14 @@ export function Reader({ bookId, onBack }: ReaderProps) {
     };
     window.addEventListener("resize", onResize);
     const gesture = gestureRef.current;
-    const stopSwipe = gesture
-      ? trackVerticalSwipe(
-          gesture,
-          () => void renditionRef.current?.prev(),
-          () => void renditionRef.current?.next(),
-        )
-      : undefined;
+    const turnPrev = () => void renditionRef.current?.prev();
+    const turnNext = () => void renditionRef.current?.next();
+    const stopSwipe = gesture ? trackVerticalSwipe(gesture, turnPrev, turnNext) : undefined;
+    const stopTrackpad = gesture ? trackpadSwipe(gesture, turnPrev, turnNext) : undefined;
 
     return () => {
       stopSwipe?.();
+      stopTrackpad?.();
       cancelled = true;
       window.clearTimeout(saveTimer);
       window.removeEventListener("resize", onResize);
