@@ -2,7 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import ePub, { type Book, type Rendition } from "epubjs";
 import { getBook, readProgress, updateProgress } from "./db";
 import { readPrefs, writeLastBook, writePrefs } from "./prefs";
+import { isEnglishLanguage, readChapterParagraphs, spineHrefs } from "./chapterText";
 import { trackpadSwipe, trackVerticalSwipe } from "./swipe";
+import { MODEL_SIZE, TRANSLATION_NOTE, translateParagraphs } from "./translate";
+import { readTranslation, translationId, writeTranslation } from "./translationStore";
 import type { ReaderPrefs } from "./types";
 
 type TocItem = { label: string; href: string };
@@ -37,6 +40,16 @@ export function Reader({ bookId, onBack }: ReaderProps) {
   const [prefs, setPrefs] = useState<ReaderPrefs>(() => readPrefs());
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const [english, setEnglish] = useState(false);
+  const [offerOpen, setOfferOpen] = useState(false);
+  const [job, setJob] = useState<string | null>(null);
+  const [french, setFrench] = useState<string[] | null>(null);
+  const turnRef = useRef<(direction: "prev" | "next") => void>(() => {});
+  const frenchModeRef = useRef(false);
+  const hrefRef = useRef("");
+  const spineRef = useRef<string[]>([]);
+  const stopJobRef = useRef(false);
+  const translationRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     writeLastBook(bookId, "epub");
@@ -57,8 +70,11 @@ export function Reader({ bookId, onBack }: ReaderProps) {
       if (cancelled) return;
 
       const navigation = await book.loaded.navigation;
+      const metadata = await book.loaded.metadata;
       const items = flattenToc(navigation.toc);
+      spineRef.current = spineHrefs(book);
       setToc(items);
+      setEnglish(isEnglishLanguage(metadata.language));
 
       const rect = stage.getBoundingClientRect();
       const rendition = book.renderTo(stage, {
@@ -81,6 +97,12 @@ export function Reader({ bookId, onBack }: ReaderProps) {
         const nextPercentage = start.percentage || 0;
         setChapter(label);
         setPercentage(nextPercentage);
+        hrefRef.current = href.split("#")[0];
+        if (frenchModeRef.current) {
+          void readTranslation(bookId, href).then((saved) => {
+            setFrench(saved?.paragraphs ?? null);
+          });
+        }
         window.clearTimeout(saveTimer);
         saveTimer = window.setTimeout(() => {
           void updateProgress(bookId, {
@@ -122,12 +144,13 @@ export function Reader({ bookId, onBack }: ReaderProps) {
     };
     window.addEventListener("resize", onResize);
     const gesture = gestureRef.current;
-    const turnPrev = () => void renditionRef.current?.prev();
-    const turnNext = () => void renditionRef.current?.next();
+    const turnPrev = () => turnRef.current("prev");
+    const turnNext = () => turnRef.current("next");
     const stopSwipe = gesture ? trackVerticalSwipe(gesture, turnPrev, turnNext) : undefined;
     const stopTrackpad = gesture ? trackpadSwipe(gesture, turnPrev, turnNext) : undefined;
 
     return () => {
+      stopJobRef.current = true;
       stopSwipe?.();
       stopTrackpad?.();
       cancelled = true;
@@ -149,7 +172,101 @@ export function Reader({ bookId, onBack }: ReaderProps) {
   function turn(direction: "prev" | "next") {
     const rendition = renditionRef.current;
     if (!rendition) return;
+    if (frenchModeRef.current) {
+      const hrefs = spineRef.current;
+      const current = hrefRef.current;
+      const index = hrefs.findIndex((href) => current.endsWith(href) || href.endsWith(current));
+      const nextHref = hrefs[index + (direction === "next" ? 1 : -1)];
+      if (nextHref) void rendition.display(nextHref);
+      return;
+    }
     void (direction === "next" ? rendition.next() : rendition.prev());
+  }
+  turnRef.current = turn;
+
+  useEffect(() => {
+    const node = translationRef.current;
+    if (!node || !french) return;
+    const stopSwipe = trackVerticalSwipe(node, () => turnRef.current("prev"), () => turnRef.current("next"), () => false);
+    const stopTrackpad = trackpadSwipe(node, () => turnRef.current("prev"), () => turnRef.current("next"));
+    return () => {
+      stopSwipe();
+      stopTrackpad();
+    };
+  }, [french]);
+
+  async function translateHref(href: string) {
+    const book = bookRef.current;
+    if (!book) return;
+    const paragraphs = await readChapterParagraphs(book, href);
+    if (paragraphs.length === 0 || stopJobRef.current) return;
+    const translated = await translateParagraphs(paragraphs, setJob, () => stopJobRef.current);
+    if (stopJobRef.current || translated.length === 0) return;
+    await writeTranslation({
+      id: translationId(bookId, href),
+      bookId,
+      href: href.split("#")[0],
+      paragraphs: translated,
+      updatedAt: Date.now(),
+    });
+    if (hrefRef.current.endsWith(href) || href.endsWith(hrefRef.current)) {
+      frenchModeRef.current = true;
+      setFrench(translated);
+    }
+  }
+
+  async function translateCurrent() {
+    const href = hrefRef.current || spineRef.current[0];
+    if (!href) return;
+    stopJobRef.current = false;
+    setOfferOpen(false);
+    setJob("Préparation…");
+    try {
+      await translateHref(href);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Traduction impossible.");
+    } finally {
+      setJob(null);
+    }
+  }
+
+  async function translateBook() {
+    const hrefs = spineRef.current;
+    stopJobRef.current = false;
+    setOfferOpen(false);
+    try {
+      for (const [index, href] of hrefs.entries()) {
+        if (stopJobRef.current) break;
+        const existing = await readTranslation(bookId, href);
+        if (existing) continue;
+        setJob(`Chapitre ${index + 1} / ${hrefs.length}`);
+        await translateHref(href);
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Traduction impossible.");
+    } finally {
+      setJob(null);
+    }
+  }
+
+  function showFrench() {
+    const href = hrefRef.current;
+    if (!href) return;
+    void readTranslation(bookId, href).then((saved) => {
+      if (!saved) {
+        setOfferOpen(true);
+        return;
+      }
+      frenchModeRef.current = true;
+      setFrench(saved.paragraphs);
+      setOfferOpen(false);
+    });
+  }
+
+  function showOriginal() {
+    frenchModeRef.current = false;
+    setFrench(null);
+    setOfferOpen(false);
   }
 
   return (
@@ -162,6 +279,11 @@ export function Reader({ bookId, onBack }: ReaderProps) {
           <strong>{title}</strong>
           <small>{chapter || "Ouverture…"}</small>
         </div>
+        {english ? (
+          <button className="icon-button" onClick={() => setOfferOpen(true)} aria-label="Traduire en français">
+            FR
+          </button>
+        ) : null}
         <button className="icon-button" onClick={() => setTocOpen(true)} aria-label="Chapitres">
           ≡
         </button>
@@ -169,6 +291,14 @@ export function Reader({ bookId, onBack }: ReaderProps) {
 
       <div className="stage-wrap">
         <div className="stage" ref={stageRef} />
+        {french ? (
+          <article className="translation" ref={translationRef}>
+            <p className="translation-note">{TRANSLATION_NOTE}</p>
+            {french.map((paragraph, index) => (
+              <p key={index}>{paragraph}</p>
+            ))}
+          </article>
+        ) : null}
         <div
           className="gesture-layer"
           ref={gestureRef}
@@ -182,6 +312,7 @@ export function Reader({ bookId, onBack }: ReaderProps) {
       </div>
 
       {!ready && !error ? <p className="reader-status">Ouverture du roman…</p> : null}
+      {job ? <p className="banner">{job}</p> : null}
       {error ? <p className="banner">{error}</p> : null}
 
       <footer className="reader-footer">
@@ -227,6 +358,37 @@ export function Reader({ bookId, onBack }: ReaderProps) {
           </button>
         ))}
       </footer>
+
+      {offerOpen ? (
+        <div className="sheet" onClick={() => setOfferOpen(false)}>
+          <aside className="offer" onClick={(event) => event.stopPropagation()}>
+            <header>
+              <h2>Traduire</h2>
+              <button className="icon-button" onClick={() => setOfferOpen(false)} aria-label="Fermer">
+                ×
+              </button>
+            </header>
+            <p>{TRANSLATION_NOTE}</p>
+            <p className="muted">Le modèle anglais → français pèse {MODEL_SIZE}. Il n’est téléchargé que si tu lances une traduction, puis il reste sur cet appareil.</p>
+            <div className="offer-actions">
+              <button type="button" className="button primary" onClick={() => void translateCurrent()}>
+                Ce chapitre
+              </button>
+              <button type="button" className="button" onClick={() => void translateBook()}>
+                Tout le livre
+              </button>
+              <button type="button" className="button" onClick={showFrench}>
+                Lire le français déjà traduit
+              </button>
+              {french ? (
+                <button type="button" className="button" onClick={showOriginal}>
+                  Revenir à l’original
+                </button>
+              ) : null}
+            </div>
+          </aside>
+        </div>
+      ) : null}
 
       {tocOpen ? (
         <div className="sheet" onClick={() => setTocOpen(false)}>

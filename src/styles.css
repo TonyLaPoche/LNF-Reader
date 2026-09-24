@@ -263,6 +263,29 @@ h1 { font-size: clamp(1.45rem, 7vw, 1.8rem); }
   touch-action: none;
 }
 
+.translation {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  overflow: auto;
+  padding: 8px 7% 24px;
+  font-family: Georgia, "Iowan Old Style", Palatino, serif;
+  font-size: 1.05rem;
+  line-height: 1.7;
+  touch-action: pan-y;
+}
+
+.translation-note {
+  font-family: "Avenir Next", "Segoe UI", sans-serif;
+  font-size: 0.82rem;
+  line-height: 1.4;
+  opacity: 0.75;
+}
+
+.offer p { margin: 12px 0; }
+.offer-actions { display: grid; gap: 8px; margin-top: 16px; }
+.offer-actions .button { width: 100%; }
+
 .pdf-stage {
   overflow: auto;
   display: flex;
