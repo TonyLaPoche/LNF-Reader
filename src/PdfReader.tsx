@@ -3,6 +3,7 @@ import type { PDFDocumentProxy } from "pdfjs-dist";
 import { getBook, readProgress, updateProgress } from "./db";
 import { openPdf } from "./pdf";
 import { readPrefs, writeLastBook, writePrefs } from "./prefs";
+import { trackVerticalSwipe } from "./swipe";
 import type { ReaderPrefs } from "./types";
 
 type PdfReaderProps = {
@@ -101,6 +102,24 @@ export function PdfReader({ bookId, onBack }: PdfReaderProps) {
   useEffect(() => {
     writePrefs(prefs);
   }, [prefs]);
+
+  useEffect(() => {
+    const frame = frameRef.current;
+    if (!frame || !ready) return;
+    return trackVerticalSwipe(
+      frame,
+      () => go(pageRef.current - 1),
+      () => go(pageRef.current + 1),
+      (direction) => {
+        const fits = frame.scrollHeight <= frame.clientHeight + 4;
+        if (fits) return true;
+        if (direction === "next") {
+          return frame.scrollTop + frame.clientHeight >= frame.scrollHeight - 8;
+        }
+        return frame.scrollTop <= 8;
+      },
+    );
+  }, [ready]);
 
   function go(next: number) {
     const pdf = pdfRef.current;

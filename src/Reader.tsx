@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import ePub, { type Book, type Rendition } from "epubjs";
 import { getBook, readProgress, updateProgress } from "./db";
 import { readPrefs, writeLastBook, writePrefs } from "./prefs";
+import { trackVerticalSwipe } from "./swipe";
 import type { ReaderPrefs } from "./types";
 
 type TocItem = { label: string; href: string };
@@ -11,10 +12,16 @@ type ReaderProps = {
   onBack: () => void;
 };
 
+const READING = {
+  "line-height": "1.7",
+  "font-family": "Georgia, Iowan Old Style, Palatino, serif",
+  padding: "0.2em 7% 1.4em",
+};
+
 const THEMES: Record<ReaderPrefs["theme"], { body: Record<string, string> }> = {
-  papier: { body: { background: "#f7f1e6", color: "#231c16" } },
-  sepia: { body: { background: "#f3e6d0", color: "#3a2a1a" } },
-  nuit: { body: { background: "#1b1916", color: "#ece6dc" } },
+  papier: { body: { ...READING, background: "#f7f1e6", color: "#231c16" } },
+  sepia: { body: { ...READING, background: "#f3e6d0", color: "#3a2a1a" } },
+  nuit: { body: { ...READING, background: "#1b1916", color: "#ece6dc" } },
 };
 
 export function Reader({ bookId, onBack }: ReaderProps) {
@@ -62,6 +69,13 @@ export function Reader({ bookId, onBack }: ReaderProps) {
       });
       renditionRef.current = rendition;
       applyLook(rendition, readPrefs());
+      rendition.hooks.content.register((contents: { document: Document }) => {
+        trackVerticalSwipe(
+          contents.document,
+          () => void rendition.prev(),
+          () => void rendition.next(),
+        );
+      });
 
       const saved = readProgress(bookId) ?? record.progress;
       rendition.on("relocated", (location: Relocated) => {
@@ -259,4 +273,5 @@ function applyLook(rendition: Rendition, prefs: ReaderPrefs) {
   }
   rendition.themes.select(prefs.theme);
   rendition.themes.fontSize(`${prefs.fontScale}%`);
+  rendition.themes.override("line-height", "1.7");
 }
