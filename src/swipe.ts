@@ -24,7 +24,10 @@ export function trackVerticalSwipe(
     if (!touch) return;
     const dx = touch.clientX - startX;
     const dy = touch.clientY - startY;
-    if (Math.abs(dy) > 18 && Math.abs(dy) > Math.abs(dx)) event.preventDefault();
+    const horizontal = Math.abs(dx) > Math.abs(dy);
+    const direction: Direction = horizontal ? (dx < 0 ? "next" : "prev") : dy < 0 ? "next" : "prev";
+    const turning = horizontal || canTurn(direction);
+    if (turning && (horizontal ? Math.abs(dx) : Math.abs(dy)) > 18) event.preventDefault();
   };
 
   const end = (event: Event) => {
@@ -34,9 +37,11 @@ export function trackVerticalSwipe(
     if (!touch) return;
     const dx = touch.clientX - startX;
     const dy = touch.clientY - startY;
-    if (Math.abs(dy) < 56 || Math.abs(dy) < Math.abs(dx)) return;
-    const direction: Direction = dy < 0 ? "next" : "prev";
-    if (!canTurn(direction)) return;
+    const horizontal = Math.abs(dx) > Math.abs(dy);
+    const distance = horizontal ? Math.abs(dx) : Math.abs(dy);
+    if (distance < 56) return;
+    const direction: Direction = horizontal ? (dx < 0 ? "next" : "prev") : dy < 0 ? "next" : "prev";
+    if (!horizontal && !canTurn(direction)) return;
     if (direction === "next") onNext();
     else onPrev();
   };

@@ -160,33 +160,37 @@ export function PdfReader({ bookId, onBack }: PdfReaderProps) {
       {error ? <p className="banner">{error}</p> : null}
 
       <footer className="reader-footer">
-        <div className="pager">
-          <button onClick={() => go(page - 1)}>Préc.</button>
-          <span>{Math.round(percentage * 100)}%</span>
-          <button onClick={() => go(page + 1)}>Suiv.</button>
-        </div>
-        <div className="tools">
-          <button
-            onClick={() =>
-              setPrefs((current) => ({
-                ...current,
-                fontScale: Math.max(80, current.fontScale - 10),
-              }))
-            }
-          >
-            −
-          </button>
-          <button
-            onClick={() =>
-              setPrefs((current) => ({
-                ...current,
-                fontScale: Math.min(180, current.fontScale + 10),
-              }))
-            }
-          >
-            +
-          </button>
-        </div>
+        <button type="button" onClick={() => go(page - 1)} aria-label="Page précédente">
+          ‹
+        </button>
+        <span>{Math.round(percentage * 100)}%</span>
+        <button type="button" onClick={() => go(page + 1)} aria-label="Page suivante">
+          ›
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            setPrefs((current) => ({
+              ...current,
+              fontScale: Math.max(80, current.fontScale - 10),
+            }))
+          }
+          aria-label="Réduire"
+        >
+          −
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            setPrefs((current) => ({
+              ...current,
+              fontScale: Math.min(180, current.fontScale + 10),
+            }))
+          }
+          aria-label="Agrandir"
+        >
+          +
+        </button>
       </footer>
     </main>
   );

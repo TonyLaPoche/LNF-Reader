@@ -179,42 +179,47 @@ export function Reader({ bookId, onBack }: ReaderProps) {
       {error ? <p className="banner">{error}</p> : null}
 
       <footer className="reader-footer">
-        <div className="pager">
-          <button onClick={() => turn("prev")}>Préc.</button>
-          <span>{Math.round(percentage * 100)}%</span>
-          <button onClick={() => turn("next")}>Suiv.</button>
-        </div>
-        <div className="tools">
+        <button type="button" onClick={() => turn("prev")} aria-label="Page précédente">
+          ‹
+        </button>
+        <span>{Math.round(percentage * 100)}%</span>
+        <button type="button" onClick={() => turn("next")} aria-label="Page suivante">
+          ›
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            setPrefs((current) => ({
+              ...current,
+              fontScale: Math.max(80, current.fontScale - 10),
+            }))
+          }
+          aria-label="Réduire le texte"
+        >
+          A−
+        </button>
+        <button
+          type="button"
+          onClick={() =>
+            setPrefs((current) => ({
+              ...current,
+              fontScale: Math.min(160, current.fontScale + 10),
+            }))
+          }
+          aria-label="Agrandir le texte"
+        >
+          A+
+        </button>
+        {(["papier", "sepia", "nuit"] as const).map((theme) => (
           <button
-            onClick={() =>
-              setPrefs((current) => ({
-                ...current,
-                fontScale: Math.max(80, current.fontScale - 10),
-              }))
-            }
+            key={theme}
+            type="button"
+            className={prefs.theme === theme ? "active" : ""}
+            onClick={() => setPrefs((current) => ({ ...current, theme }))}
           >
-            A−
+            {theme}
           </button>
-          <button
-            onClick={() =>
-              setPrefs((current) => ({
-                ...current,
-                fontScale: Math.min(160, current.fontScale + 10),
-              }))
-            }
-          >
-            A+
-          </button>
-          {(["papier", "sepia", "nuit"] as const).map((theme) => (
-            <button
-              key={theme}
-              className={prefs.theme === theme ? "active" : ""}
-              onClick={() => setPrefs((current) => ({ ...current, theme }))}
-            >
-              {theme}
-            </button>
-          ))}
-        </div>
+        ))}
       </footer>
 
       {tocOpen ? (
