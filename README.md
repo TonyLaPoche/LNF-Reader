@@ -1,6 +1,6 @@
 # LNF-Reader
 
-Lecteur web temporaire pour lire des light novels et des web novels pendant que le site LNF est indisponible.
+Lecteur web pour lire des light novels et des web novels au format .epub et .pdf accès simple sans passer par des stores.
 
 Adresse : [https://tonylapoche.github.io/LNF-Reader/](https://tonylapoche.github.io/LNF-Reader/)
 
