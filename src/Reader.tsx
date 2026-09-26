@@ -200,6 +200,7 @@ export function Reader({ bookId, onBack }: ReaderProps) {
   }, [prefs]);
 
   function turn(direction: "prev" | "next") {
+    playPageTurn(stageRef.current?.parentElement ?? null, direction);
     const rendition = renditionRef.current;
     if (!rendition) return;
     if (frenchModeRef.current) {
@@ -421,7 +422,7 @@ export function Reader({ bookId, onBack }: ReaderProps) {
       ) : null}
 
       {tocOpen ? (
-        <div className="sheet" onClick={() => setTocOpen(false)}>
+        <div className="sheet toc-sheet" onClick={() => setTocOpen(false)}>
           <aside onClick={(event) => event.stopPropagation()}>
             <header>
               <h2>Chapitres</h2>
@@ -462,6 +463,13 @@ function flattenToc(items: NavItem[] | undefined, acc: TocItem[] = []): TocItem[
     if (item.subitems?.length) flattenToc(item.subitems, acc);
   }
   return acc;
+}
+
+function playPageTurn(node: HTMLElement | null, direction: "prev" | "next") {
+  if (!node) return;
+  node.classList.remove("turn-next", "turn-prev");
+  void node.offsetWidth;
+  node.classList.add(direction === "next" ? "turn-next" : "turn-prev");
 }
 
 function viewIsImage(rendition: Rendition | null): boolean {

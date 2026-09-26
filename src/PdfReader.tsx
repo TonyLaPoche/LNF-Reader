@@ -148,7 +148,10 @@ export function PdfReader({ bookId, onBack }: PdfReaderProps) {
   function go(next: number) {
     const pdf = pdfRef.current;
     if (!pdf) return;
-    setPage(clampPage(next, pdf.numPages));
+    const target = clampPage(next, pdf.numPages);
+    if (target === pageRef.current) return;
+    playPageTurn(frameRef.current, target > pageRef.current ? "next" : "prev");
+    setPage(target);
   }
 
   const percentage = page / pageCount;
@@ -218,6 +221,13 @@ export function PdfReader({ bookId, onBack }: PdfReaderProps) {
       </footer>
     </main>
   );
+}
+
+function playPageTurn(node: HTMLElement | null, direction: "prev" | "next") {
+  if (!node) return;
+  node.classList.remove("turn-next", "turn-prev");
+  void node.offsetWidth;
+  node.classList.add(direction === "next" ? "turn-next" : "turn-prev");
 }
 
 function clampPage(page: number, total: number): number {

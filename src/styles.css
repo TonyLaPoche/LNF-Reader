@@ -396,10 +396,51 @@ h1 { font-size: clamp(1.45rem, 7vw, 1.8rem); }
 
 .sheet {
   position: fixed;
+  z-index: 40;
   inset: 0;
   background: rgba(0, 0, 0, 0.45);
   display: flex;
   justify-content: flex-end;
+  overflow: hidden;
+  touch-action: manipulation;
+}
+
+.toc-sheet {
+  animation: shade-in 200ms ease;
+}
+
+.toc-sheet aside {
+  animation: sheet-in 280ms cubic-bezier(0.22, 0.8, 0.2, 1);
+}
+
+@keyframes shade-in {
+  from { background: rgba(0, 0, 0, 0); }
+  to { background: rgba(0, 0, 0, 0.45); }
+}
+
+@keyframes sheet-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+.stage-wrap.turn-next,
+.pdf-stage.turn-next {
+  animation: page-next 240ms ease;
+}
+
+.stage-wrap.turn-prev,
+.pdf-stage.turn-prev {
+  animation: page-prev 240ms ease;
+}
+
+@keyframes page-next {
+  from { transform: translateX(14%); opacity: 0.35; }
+  to { transform: none; opacity: 1; }
+}
+
+@keyframes page-prev {
+  from { transform: translateX(-14%); opacity: 0.35; }
+  to { transform: none; opacity: 1; }
 }
 
 @media (min-width: 560px) {
@@ -419,13 +460,29 @@ h1 { font-size: clamp(1.45rem, 7vw, 1.8rem); }
 
 .sheet aside {
   width: min(100%, 360px);
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
   background: #171512;
   color: #f6f1ea;
-  padding: calc(12px + env(safe-area-inset-top)) 16px 16px;
-  overflow: auto;
+  padding: calc(12px + env(safe-area-inset-top)) 16px calc(16px + env(safe-area-inset-bottom));
+  overflow: hidden;
+  touch-action: manipulation;
 }
 
-.sheet ul { list-style: none; padding: 0; margin: 12px 0 0; }
+.sheet ul {
+  list-style: none;
+  padding: 0;
+  margin: 12px 0 0;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+}
 .sheet button {
   width: 100%;
   text-align: left;
@@ -434,4 +491,5 @@ h1 { font-size: clamp(1.45rem, 7vw, 1.8rem); }
   border: 0;
   padding: 12px 0;
   border-bottom: 1px solid #2e2924;
+  touch-action: manipulation;
 }
