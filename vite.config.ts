@@ -33,7 +33,7 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2,mjs}"],
-        globIgnores: ["**/*.wasm", "**/*onnx*"],
+        globIgnores: ["**/*.wasm", "**/*onnx*", "**/kokoro-*.js"],
         maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
       },
     }),

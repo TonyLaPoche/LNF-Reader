@@ -33,6 +33,10 @@ export function isIos(): boolean {
   return /iphone|ipad|ipod/i.test(navigator.userAgent);
 }
 
+export function isMobileOs(): boolean {
+  return isIos() || /android/i.test(navigator.userAgent);
+}
+
 export function subscribeInstall(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);

@@ -11,6 +11,7 @@
   "dependencies": {
     "@huggingface/transformers": "^4.3.0",
     "epubjs": "^0.3.93",
+    "kokoro-js": "^1.2.1",
     "pdfjs-dist": "^5.7.284",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"

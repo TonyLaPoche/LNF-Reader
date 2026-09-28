@@ -1,7 +1,22 @@
 import { useEffect, useRef, useState } from "react";
-import ePub, { type Book, type Rendition } from "epubjs";
+import ePub, { EpubCFI, type Book, type Rendition } from "epubjs";
 import { getBook, readProgress, updateProgress } from "./db";
+import { isMobileOs } from "./install";
 import { readPrefs, writeLastBook, writePrefs } from "./prefs";
+import {
+  KOKORO_MODEL_SIZE,
+  KOKORO_NOTE,
+  OPEN_VOICES,
+  downloadOpenVoice,
+  downloadedVoices,
+  pageSpeech,
+  preferredSystemVoice,
+  readTtsPrefs,
+  watchSystemVoices,
+  writeTtsPrefs,
+  type OpenVoiceId,
+  type TtsPrefs,
+} from "./tts";
 import { isEnglishLanguage, readChapterParagraphs, spineHrefs } from "./chapterText";
 import { applyImageView, trackpadSwipe, trackVerticalSwipe, trackZoomPan, type ImageView } from "./swipe";
 import { MODEL_SIZE, TRANSLATION_NOTE, translateParagraphs } from "./translate";
@@ -50,6 +65,18 @@ export function Reader({ bookId, onBack }: ReaderProps) {
   const spineRef = useRef<string[]>([]);
   const stopJobRef = useRef(false);
   const translationRef = useRef<HTMLElement>(null);
+  const keepGoingRef = useRef(false);
+  const armSpeakRef = useRef(false);
+  const speakRef = useRef<() => void>(() => {});
+  const cfiRef = useRef("");
+  const [tts, setTts] = useState<TtsPrefs>(() => readTtsPrefs());
+  const [speechPhase, setSpeechPhase] = useState(pageSpeech.phase);
+  const [systemVoices, setSystemVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  const [ttsHint, setTtsHint] = useState<string | null>(null);
+  const [savedVoices, setSavedVoices] = useState<OpenVoiceId[]>(() => downloadedVoices());
+  const [downloadingId, setDownloadingId] = useState<OpenVoiceId | null>(null);
+  const mobileOs = isMobileOs();
 
   useEffect(() => {
     writeLastBook(bookId, "epub");
@@ -95,6 +122,7 @@ export function Reader({ bookId, onBack }: ReaderProps) {
         const label = chapterLabel(items, href);
         const cfi = start?.cfi;
         if (!cfi) return;
+        cfiRef.current = cfi;
         const nextPercentage = start.percentage || 0;
         setChapter(label);
         setPercentage(nextPercentage);
@@ -107,6 +135,10 @@ export function Reader({ bookId, onBack }: ReaderProps) {
           void readTranslation(bookId, href).then((saved) => {
             setFrench(saved?.paragraphs ?? null);
           });
+        }
+        if (armSpeakRef.current) {
+          armSpeakRef.current = false;
+          speakRef.current();
         }
         window.clearTimeout(saveTimer);
         saveTimer = window.setTimeout(() => {
@@ -180,6 +212,8 @@ export function Reader({ bookId, onBack }: ReaderProps) {
 
     return () => {
       stopJobRef.current = true;
+      keepGoingRef.current = false;
+      pageSpeech.stop();
       stopSwipe?.();
       stopTrackpad?.();
       stopZoom?.();
@@ -200,6 +234,11 @@ export function Reader({ bookId, onBack }: ReaderProps) {
   }, [prefs]);
 
   function turn(direction: "prev" | "next") {
+    const wasSpeaking = pageSpeech.phase === "playing" || pageSpeech.phase === "loading";
+    const wasPaused = pageSpeech.phase === "paused";
+    if (wasSpeaking || wasPaused) pageSpeech.stop();
+    if (wasPaused) keepGoingRef.current = false;
+    if (wasSpeaking) armSpeakRef.current = true;
     playPageTurn(stageRef.current?.parentElement ?? null, direction);
     const rendition = renditionRef.current;
     if (!rendition) return;
@@ -214,6 +253,81 @@ export function Reader({ bookId, onBack }: ReaderProps) {
     void (direction === "next" ? rendition.next() : rendition.prev());
   }
   turnRef.current = turn;
+
+  useEffect(() => pageSpeech.subscribe(() => setSpeechPhase(pageSpeech.phase)), []);
+  useEffect(() => watchSystemVoices(setSystemVoices), []);
+
+  function updateTts(patch: Partial<TtsPrefs>) {
+    setTts((current) => {
+      const next = { ...current, ...patch };
+      writeTtsPrefs(next);
+      if (patch.volume !== undefined) pageSpeech.setVolume(patch.volume);
+      return next;
+    });
+  }
+
+  function speakCurrent() {
+    const text = currentPageText(renditionRef.current, frenchModeRef.current ? translationRef.current : null);
+    if (!text) {
+      keepGoingRef.current = false;
+      pageSpeech.stop();
+      setTtsHint("Cette page n’a pas de texte à lire.");
+      return;
+    }
+    setTtsHint(null);
+    const before = cfiRef.current;
+    void pageSpeech.play({
+      text,
+      prefs: readTtsPrefs(),
+      onStatus: setTtsHint,
+      onDone: () => {
+        if (!keepGoingRef.current) return;
+        armSpeakRef.current = true;
+        turnRef.current("next");
+        window.setTimeout(() => {
+          if (cfiRef.current === before) {
+            keepGoingRef.current = false;
+            armSpeakRef.current = false;
+            pageSpeech.stop();
+          }
+        }, 1500);
+      },
+    });
+  }
+  speakRef.current = speakCurrent;
+
+  function toggleSpeech() {
+    if (pageSpeech.phase === "loading") {
+      keepGoingRef.current = false;
+      pageSpeech.stop();
+      return;
+    }
+    if (pageSpeech.phase === "playing") {
+      pageSpeech.pause();
+      return;
+    }
+    if (pageSpeech.phase === "paused") {
+      keepGoingRef.current = true;
+      pageSpeech.resume();
+      return;
+    }
+    keepGoingRef.current = true;
+    speakCurrent();
+  }
+
+  async function fetchVoice(id: OpenVoiceId) {
+    setDownloadingId(id);
+    try {
+      await downloadOpenVoice(id, setTtsHint);
+      setSavedVoices(downloadedVoices());
+      updateTts({ engine: "kokoro", kokoroVoice: id });
+      setTtsHint(null);
+    } catch (cause) {
+      setTtsHint(cause instanceof Error ? cause.message : "Téléchargement impossible.");
+    } finally {
+      setDownloadingId(null);
+    }
+  }
 
   useEffect(() => {
     const node = translationRef.current;
@@ -346,6 +460,32 @@ export function Reader({ bookId, onBack }: ReaderProps) {
       {job ? <p className="banner">{job}</p> : null}
       {error ? <p className="banner">{error}</p> : null}
 
+      <div className="tts-bar">
+        <button
+          type="button"
+          onClick={toggleSpeech}
+          aria-label={speechPhase === "playing" ? "Pause" : speechPhase === "paused" ? "Reprendre" : "Lire la page"}
+        >
+          {speechPhase === "playing" ? "❚❚" : speechPhase === "loading" ? "…" : "▶"}
+        </button>
+        <label className="tts-volume">
+          <span>Volume</span>
+          <input
+            type="range"
+            min={0}
+            max={1}
+            step={0.05}
+            value={tts.volume}
+            aria-label="Volume"
+            onChange={(event) => updateTts({ volume: Number(event.target.value) })}
+          />
+        </label>
+        {ttsHint ? <small className="tts-hint">{ttsHint}</small> : null}
+        <button type="button" onClick={() => setVoiceOpen(true)} aria-label="Options de voix">
+          Voix
+        </button>
+      </div>
+
       <footer className="reader-footer">
         <button type="button" onClick={() => turn("prev")} aria-label="Page précédente">
           ‹
@@ -389,6 +529,80 @@ export function Reader({ bookId, onBack }: ReaderProps) {
           </button>
         ))}
       </footer>
+
+      {voiceOpen ? (
+        <div className="sheet" onClick={() => setVoiceOpen(false)}>
+          <aside onClick={(event) => event.stopPropagation()}>
+            <header>
+              <h2>Voix</h2>
+              <button className="icon-button" onClick={() => setVoiceOpen(false)} aria-label="Fermer">
+                ×
+              </button>
+            </header>
+            <div className="sheet-body">
+              <label className="voice-field">
+                <span>Vitesse</span>
+                <input
+                  type="range"
+                  min={0.7}
+                  max={1.6}
+                  step={0.1}
+                  value={tts.rate}
+                  onChange={(event) => updateTts({ rate: Number(event.target.value) })}
+                />
+              </label>
+              <label className="voice-field">
+                <span>Voix du téléphone</span>
+                <select
+                  value={
+                    tts.engine === "system"
+                      ? tts.voiceURI || preferredSystemVoice(systemVoices, "")?.voiceURI || ""
+                      : ""
+                  }
+                  onChange={(event) => updateTts({ engine: "system", voiceURI: event.target.value })}
+                >
+                  {systemVoices.length === 0 ? <option value="">Voix du navigateur</option> : null}
+                  {systemVoices.map((voice) => (
+                    <option key={voice.voiceURI} value={voice.voiceURI}>
+                      {voice.name} · {voice.lang}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              {mobileOs ? (
+                <section className="open-voices">
+                  <h3>Voix open source</h3>
+                  <p className="muted">{KOKORO_NOTE}</p>
+                  <p className="muted">
+                    Le modèle pèse {KOKORO_MODEL_SIZE} et n’est téléchargé qu’une fois. Chaque voix ajoute environ 0,5 Mo, puis reste sur cet appareil.
+                  </p>
+                  {OPEN_VOICES.map((voice) => {
+                    const ready = savedVoices.includes(voice.id);
+                    const active = tts.engine === "kokoro" && tts.kokoroVoice === voice.id;
+                    return (
+                      <div className="voice-row" key={voice.id}>
+                        <div>
+                          <strong>{voice.name}</strong>
+                          <small>{voice.detail}</small>
+                        </div>
+                        {ready ? (
+                          <button type="button" className={active ? "active" : ""} onClick={() => updateTts({ engine: "kokoro", kokoroVoice: voice.id })}>
+                            {active ? "Utilisée" : "Utiliser"}
+                          </button>
+                        ) : (
+                          <button type="button" disabled={downloadingId !== null} onClick={() => void fetchVoice(voice.id)}>
+                            {downloadingId === voice.id ? "…" : "Télécharger"}
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </section>
+              ) : null}
+            </div>
+          </aside>
+        </div>
+      ) : null}
 
       {offerOpen ? (
         <div className="sheet" onClick={() => setOfferOpen(false)}>
@@ -470,6 +684,41 @@ function playPageTurn(node: HTMLElement | null, direction: "prev" | "next") {
   node.classList.remove("turn-next", "turn-prev");
   void node.offsetWidth;
   node.classList.add(direction === "next" ? "turn-next" : "turn-prev");
+}
+
+function currentPageText(rendition: Rendition | null, article: HTMLElement | null): string {
+  if (article) return visibleArticleText(article);
+  return visibleEpubText(rendition);
+}
+
+function visibleArticleText(article: HTMLElement): string {
+  const box = article.getBoundingClientRect();
+  const parts: string[] = [];
+  for (const node of article.querySelectorAll("p:not(.translation-note)")) {
+    const rect = node.getBoundingClientRect();
+    if (rect.bottom > box.top + 8 && rect.top < box.bottom - 8) parts.push(node.textContent ?? "");
+  }
+  return parts.join(" ").replace(/\s+/g, " ").trim();
+}
+
+function visibleEpubText(rendition: Rendition | null): string {
+  const location = rendition?.currentLocation() as { start?: { cfi?: string }; end?: { cfi?: string } } | undefined;
+  const contents = (rendition as { getContents?: () => Array<{ document?: Document }> } | null)?.getContents?.() ?? [];
+  const doc = contents[0]?.document;
+  const startCfi = location?.start?.cfi;
+  const endCfi = location?.end?.cfi;
+  if (!doc || !startCfi || !endCfi) return "";
+  const start = new EpubCFI(startCfi).toRange(doc);
+  const end = new EpubCFI(endCfi).toRange(doc);
+  if (!start || !end) return "";
+  try {
+    const range = doc.createRange();
+    range.setStart(start.startContainer, start.startOffset);
+    range.setEnd(end.endContainer, end.endOffset);
+    return range.toString().replace(/\s+/g, " ").trim();
+  } catch {
+    return "";
+  }
 }
 
 function viewIsImage(rendition: Rendition | null): boolean {
