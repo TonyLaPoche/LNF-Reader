@@ -10,12 +10,16 @@ import {
   downloadOpenVoice,
   downloadedVoices,
   pageSpeech,
-  preferredSystemVoice,
+  readFavoriteVoices,
   readTtsPrefs,
+  spokenVoiceLang,
+  toggleFavoriteVoice,
+  voicesForLang,
   watchSystemVoices,
   writeTtsPrefs,
   type OpenVoiceId,
   type TtsPrefs,
+  type VoiceLang,
 } from "./tts";
 import { isEnglishLanguage, readChapterParagraphs, spineHrefs } from "./chapterText";
 import { applyImageView, trackpadSwipe, trackVerticalSwipe, trackZoomPan, type ImageView } from "./swipe";
@@ -69,6 +73,10 @@ export function Reader({ bookId, onBack }: ReaderProps) {
   const armSpeakRef = useRef(false);
   const speakRef = useRef<() => void>(() => {});
   const cfiRef = useRef("");
+  const bookLangRef = useRef("fr");
+  const [bookLang, setBookLang] = useState("fr");
+  const [favorites, setFavorites] = useState(readFavoriteVoices);
+  const [showAllVoices, setShowAllVoices] = useState(false);
   const [tts, setTts] = useState<TtsPrefs>(() => readTtsPrefs());
   const [speechPhase, setSpeechPhase] = useState(pageSpeech.phase);
   const [systemVoices, setSystemVoices] = useState<SpeechSynthesisVoice[]>([]);
@@ -102,6 +110,9 @@ export function Reader({ bookId, onBack }: ReaderProps) {
       const items = flattenToc(navigation.toc);
       spineRef.current = spineHrefs(book);
       setToc(items);
+      const language = (metadata.language ?? "fr").toLowerCase();
+      bookLangRef.current = language;
+      setBookLang(language);
       setEnglish(isEnglishLanguage(metadata.language));
 
       const rect = stage.getBoundingClientRect();
@@ -279,6 +290,7 @@ export function Reader({ bookId, onBack }: ReaderProps) {
     void pageSpeech.play({
       text,
       prefs: readTtsPrefs(),
+      lang: spokenVoiceLang(bookLangRef.current, frenchModeRef.current),
       onStatus: setTtsHint,
       onDone: () => {
         if (!keepGoingRef.current) return;
@@ -328,6 +340,24 @@ export function Reader({ bookId, onBack }: ReaderProps) {
       setDownloadingId(null);
     }
   }
+
+  function chooseVoice(lang: VoiceLang, voiceURI: string) {
+    updateTts({
+      engine: "system",
+      voiceURI,
+      voiceByLang: { ...tts.voiceByLang, [lang]: voiceURI },
+    });
+  }
+
+  const spoken = spokenVoiceLang(bookLang, french !== null);
+  const matchingVoices = voicesForLang(systemVoices, spoken);
+  const favoriteIds = favorites[spoken].filter((id) => matchingVoices.some((voice) => voice.voiceURI === id));
+  const listedVoices =
+    favoriteIds.length > 0 && !showAllVoices
+      ? matchingVoices.filter((voice) => favoriteIds.includes(voice.voiceURI))
+      : matchingVoices;
+  const selectedVoice = tts.voiceByLang[spoken] || tts.voiceURI;
+  const spokenLabel = spoken === "fr" ? "Voix françaises" : "Voix anglaises";
 
   useEffect(() => {
     const node = translationRef.current;
@@ -551,25 +581,47 @@ export function Reader({ bookId, onBack }: ReaderProps) {
                   onChange={(event) => updateTts({ rate: Number(event.target.value) })}
                 />
               </label>
-              <label className="voice-field">
-                <span>Voix du téléphone</span>
-                <select
-                  value={
-                    tts.engine === "system"
-                      ? tts.voiceURI || preferredSystemVoice(systemVoices, "")?.voiceURI || ""
-                      : ""
-                  }
-                  onChange={(event) => updateTts({ engine: "system", voiceURI: event.target.value })}
-                >
-                  {systemVoices.length === 0 ? <option value="">Voix du navigateur</option> : null}
-                  {systemVoices.map((voice) => (
-                    <option key={voice.voiceURI} value={voice.voiceURI}>
-                      {voice.name} · {voice.lang}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              {mobileOs ? (
+              <div className="voice-field">
+                <span>{spokenLabel}</span>
+                {listedVoices.length === 0 ? (
+                  <p className="muted">Aucune voix {spoken === "fr" ? "française" : "anglaise"} sur cet appareil.</p>
+                ) : (
+                  <ul className="voice-list">
+                    {listedVoices.map((voice) => {
+                      const favorite = favoriteIds.includes(voice.voiceURI);
+                      const active = tts.engine === "system" && selectedVoice === voice.voiceURI;
+                      return (
+                        <li key={voice.voiceURI}>
+                          <button
+                            type="button"
+                            className="star"
+                            aria-label={favorite ? "Retirer des favoris" : "Ajouter aux favoris"}
+                            onClick={() => setFavorites(toggleFavoriteVoice(spoken, voice.voiceURI))}
+                          >
+                            {favorite ? "★" : "☆"}
+                          </button>
+                          <button
+                            type="button"
+                            className={active ? "active" : ""}
+                            onClick={() => chooseVoice(spoken, voice.voiceURI)}
+                          >
+                            {voice.name}
+                            <small>{voice.lang}</small>
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+                {favoriteIds.length > 0 ? (
+                  <button type="button" className="text-button" onClick={() => setShowAllVoices((current) => !current)}>
+                    {showAllVoices ? "Favoris seulement" : `Toutes les voix ${spoken === "fr" ? "françaises" : "anglaises"}`}
+                  </button>
+                ) : (
+                  <p className="muted">Marque une étoile pour ne garder que tes voix.</p>
+                )}
+              </div>
+              {mobileOs && spoken === "en" ? (
                 <section className="open-voices">
                   <h3>Voix open source</h3>
                   <p className="muted">{KOKORO_NOTE}</p>

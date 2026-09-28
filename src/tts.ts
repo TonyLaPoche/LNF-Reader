@@ -1,5 +1,6 @@
 const PREFS_KEY = "lnf:tts";
 const DOWNLOADED_KEY = "lnf:kokoro-voices";
+const FAVORITES_KEY = "lnf:voice-favorites";
 const MODEL_ID = "onnx-community/Kokoro-82M-v1.0-ONNX";
 
 export const KOKORO_MODEL_SIZE = "environ 90 Mo";
@@ -17,10 +18,13 @@ export type OpenVoiceId = (typeof OPEN_VOICES)[number]["id"];
 export type TtsEngine = "system" | "kokoro";
 export type TtsPhase = "idle" | "loading" | "playing" | "paused";
 
+export type VoiceLang = "fr" | "en";
+
 export type TtsPrefs = {
   volume: number;
   rate: number;
   voiceURI: string;
+  voiceByLang: Record<VoiceLang, string>;
   engine: TtsEngine;
   kokoroVoice: OpenVoiceId;
 };
@@ -29,6 +33,7 @@ const DEFAULT_PREFS: TtsPrefs = {
   volume: 1,
   rate: 1,
   voiceURI: "",
+  voiceByLang: { fr: "", en: "" },
   engine: "system",
   kokoroVoice: "af_heart",
 };
@@ -51,10 +56,15 @@ export function readTtsPrefs(): TtsPrefs {
     const kokoroVoice = OPEN_VOICES.some((voice) => voice.id === parsed.kokoroVoice)
       ? (parsed.kokoroVoice as OpenVoiceId)
       : DEFAULT_PREFS.kokoroVoice;
+    const voiceByLang = parsed.voiceByLang ?? DEFAULT_PREFS.voiceByLang;
     return {
       volume: clamp(parsed.volume, 0, 1, DEFAULT_PREFS.volume),
       rate: clamp(parsed.rate, 0.7, 1.6, DEFAULT_PREFS.rate),
       voiceURI: typeof parsed.voiceURI === "string" ? parsed.voiceURI : "",
+      voiceByLang: {
+        fr: typeof voiceByLang.fr === "string" ? voiceByLang.fr : "",
+        en: typeof voiceByLang.en === "string" ? voiceByLang.en : "",
+      },
       engine: parsed.engine === "kokoro" ? "kokoro" : "system",
       kokoroVoice,
     };
@@ -96,14 +106,40 @@ export function watchSystemVoices(onChange: (voices: SpeechSynthesisVoice[]) => 
   return () => synth.removeEventListener("voiceschanged", emit);
 }
 
-export function preferredSystemVoice(voices: SpeechSynthesisVoice[], voiceURI: string) {
-  const chosen = voices.find((voice) => voice.voiceURI === voiceURI);
-  if (chosen) return chosen;
-  return (
-    voices.find((voice) => voice.lang.toLowerCase().startsWith("fr")) ??
-    voices.find((voice) => voice.default) ??
-    voices[0]
-  );
+export function spokenVoiceLang(bookLanguage: string, readingFrench: boolean): VoiceLang {
+  if (readingFrench) return "fr";
+  return bookLanguage.toLowerCase().startsWith("en") ? "en" : "fr";
+}
+
+export function voicesForLang(voices: SpeechSynthesisVoice[], lang: VoiceLang) {
+  return voices.filter((voice) => voice.lang.toLowerCase().replace("_", "-").startsWith(lang));
+}
+
+export function readFavoriteVoices(): Record<VoiceLang, string[]> {
+  try {
+    const raw = localStorage.getItem(FAVORITES_KEY);
+    const parsed = raw ? (JSON.parse(raw) as Partial<Record<VoiceLang, string[]>>) : {};
+    return {
+      fr: Array.isArray(parsed.fr) ? parsed.fr.filter((id) => typeof id === "string") : [],
+      en: Array.isArray(parsed.en) ? parsed.en.filter((id) => typeof id === "string") : [],
+    };
+  } catch {
+    return { fr: [], en: [] };
+  }
+}
+
+export function toggleFavoriteVoice(lang: VoiceLang, voiceURI: string) {
+  const current = readFavoriteVoices();
+  const list = current[lang];
+  current[lang] = list.includes(voiceURI) ? list.filter((id) => id !== voiceURI) : [...list, voiceURI];
+  localStorage.setItem(FAVORITES_KEY, JSON.stringify(current));
+  return current;
+}
+
+export function preferredSystemVoice(voices: SpeechSynthesisVoice[], voiceURI: string, lang: VoiceLang = "fr") {
+  const pool = voicesForLang(voices, lang);
+  const source = pool.length > 0 ? pool : voices;
+  return source.find((voice) => voice.voiceURI === voiceURI) ?? source[0];
 }
 
 export function loadKokoro(onProgress: (label: string) => void): Promise<KokoroModel> {
@@ -146,6 +182,7 @@ export async function downloadOpenVoice(id: OpenVoiceId, onProgress: (label: str
 type PlayOptions = {
   text: string;
   prefs: TtsPrefs;
+  lang: VoiceLang;
   onDone: () => void;
   onStatus: (label: string | null) => void;
 };
@@ -163,6 +200,7 @@ class PageSpeech {
   private resumePrefs: TtsPrefs | null = null;
   private resumeOnDone: (() => void) | null = null;
   private resumeOnStatus: ((label: string | null) => void) | null = null;
+  private resumeLang: VoiceLang = "fr";
   private pendingFinish: (() => void) | null = null;
 
   subscribe(listener: () => void) {
@@ -226,6 +264,7 @@ class PageSpeech {
     void this.play({
       text: rest,
       prefs: this.resumePrefs,
+      lang: this.resumeLang,
       onDone: this.resumeOnDone,
       onStatus: this.resumeOnStatus,
     });
@@ -235,19 +274,20 @@ class PageSpeech {
     if (this.gain) this.gain.gain.value = volume;
   }
 
-  async play({ text, prefs, onDone, onStatus }: PlayOptions) {
+  async play({ text, prefs, lang, onDone, onStatus }: PlayOptions) {
     this.stop();
     const token = this.token;
     this.activeText = text;
     this.spokenIndex = 0;
     this.resumePrefs = prefs;
+    this.resumeLang = lang;
     this.resumeOnDone = onDone;
     this.resumeOnStatus = onStatus;
     this.phase = "loading";
     this.notify();
     try {
-      if (prefs.engine === "kokoro") await this.playKokoro(text, prefs, token, onDone, onStatus);
-      else this.playSystem(text, prefs, token, onDone);
+      if (prefs.engine === "kokoro" && lang === "en") await this.playKokoro(text, prefs, token, onDone, onStatus);
+      else this.playSystem(text, prefs, lang, token, onDone);
     } catch (error) {
       if (token !== this.token) return;
       this.phase = "idle";
@@ -256,13 +296,14 @@ class PageSpeech {
     }
   }
 
-  private playSystem(text: string, prefs: TtsPrefs, token: number, onDone: () => void) {
+  private playSystem(text: string, prefs: TtsPrefs, lang: VoiceLang, token: number, onDone: () => void) {
     const synth = window.speechSynthesis;
     if (!synth) throw new Error("Ce navigateur ne lit pas le texte à voix haute.");
     const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = lang === "fr" ? "fr-FR" : "en-US";
     utterance.rate = prefs.rate;
     utterance.volume = prefs.volume;
-    const voice = preferredSystemVoice(synth.getVoices(), prefs.voiceURI);
+    const voice = preferredSystemVoice(synth.getVoices(), prefs.voiceByLang[lang] || prefs.voiceURI, lang);
     if (voice) utterance.voice = voice;
     utterance.onboundary = (event) => {
       if (typeof event.charIndex === "number") this.spokenIndex = event.charIndex;

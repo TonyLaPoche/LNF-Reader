@@ -449,14 +449,56 @@ h1 { font-size: clamp(1.45rem, 7vw, 1.8rem); }
   margin: 14px 0;
 }
 
-.voice-field select {
-  width: 100%;
-  min-height: 44px;
-  border-radius: 12px;
-  border: 1px solid #4a433c;
-  background: #221e1a;
+.voice-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 0;
+}
+
+.voice-list li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-bottom: 1px solid #2e2924;
+}
+
+.sheet .voice-list button.star {
+  width: 44px;
+  flex: none;
+  text-align: center;
+  border: 0;
+  background: transparent;
+  color: #e8a87c;
+  font-size: 1.2rem;
+}
+
+.sheet .voice-list button:not(.star) {
+  width: auto;
+  flex: 1;
+  text-align: left;
+  border: 0;
+  background: transparent;
   color: inherit;
-  padding: 8px 10px;
+  border-radius: 12px;
+}
+
+.sheet .voice-list button:not(.star).active {
+  background: #e8a87c;
+  color: #24180f;
+}
+
+.sheet .voice-list small {
+  display: block;
+  opacity: 0.7;
+}
+
+.sheet .text-button {
+  width: auto;
+  margin-top: 10px;
+  border: 0;
+  background: transparent;
+  color: #e8a87c;
+  padding: 8px 0;
 }
 
 .open-voices h3 { margin: 18px 0 8px; font-size: 1rem; }
