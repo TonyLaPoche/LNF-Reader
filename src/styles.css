@@ -274,7 +274,7 @@ h1 { font-size: clamp(1.45rem, 7vw, 1.8rem); }
   padding-top: env(safe-area-inset-top);
   padding-bottom: 0;
   overflow: hidden;
-  touch-action: none;
+  touch-action: manipulation;
   overscroll-behavior: none;
 }
 
@@ -421,7 +421,11 @@ h1 { font-size: clamp(1.45rem, 7vw, 1.8rem); }
   flex: 1;
   width: 100%;
   min-width: 0;
+  height: 32px;
+  margin: 0;
   accent-color: #e8a87c;
+  touch-action: pan-x;
+  pointer-events: auto;
 }
 
 .tts-hint {
@@ -515,6 +519,7 @@ h1 { font-size: clamp(1.45rem, 7vw, 1.8rem); }
 
 .voice-row strong, .voice-row small { display: block; }
 .voice-row small { opacity: 0.7; }
+.voice-row > div { flex: 1; min-width: 0; }
 
 .voice-row button {
   width: auto;
@@ -638,4 +643,12 @@ h1 { font-size: clamp(1.45rem, 7vw, 1.8rem); }
 .sheet .voice-row button.active {
   background: #e8a87c;
   color: #24180f;
+}
+
+.sheet .voice-row button.star {
+  width: 44px;
+  background: transparent;
+  color: #e8a87c;
+  font-size: 1.2rem;
+  padding: 0;
 }

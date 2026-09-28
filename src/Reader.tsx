@@ -271,10 +271,18 @@ export function Reader({ bookId, onBack }: ReaderProps) {
   useEffect(() => watchSystemVoices(setSystemVoices), []);
 
   function updateTts(patch: Partial<TtsPrefs>) {
+    const voiceChanged =
+      patch.engine !== undefined ||
+      patch.voiceURI !== undefined ||
+      patch.voiceByLang !== undefined ||
+      patch.piperVoice !== undefined ||
+      patch.kokoroVoice !== undefined;
     setTts((current) => {
       const next = { ...current, ...patch };
       writeTtsPrefs(next);
       if (patch.volume !== undefined) pageSpeech.setVolume(patch.volume);
+      if (patch.rate !== undefined) pageSpeech.setRate(patch.rate);
+      if (voiceChanged) pageSpeech.useVoice(next);
       return next;
     });
   }
@@ -367,11 +375,18 @@ export function Reader({ bookId, onBack }: ReaderProps) {
 
   const spoken = spokenVoiceLang(bookLang, french !== null);
   const matchingVoices = voicesForLang(systemVoices, spoken);
-  const favoriteIds = favorites[spoken].filter((id) => matchingVoices.some((voice) => voice.voiceURI === id));
+  const systemFavoriteIds = favorites[spoken].filter((id) => matchingVoices.some((voice) => voice.voiceURI === id));
+  const piperFavoriteIds = favorites[spoken].filter((id) =>
+    PIPER_VOICES.some((voice) => voice.lang === spoken && id === `piper:${voice.id}`),
+  );
+  const hasFavorites = systemFavoriteIds.length + piperFavoriteIds.length > 0;
   const listedVoices =
-    favoriteIds.length > 0 && !showAllVoices
-      ? matchingVoices.filter((voice) => favoriteIds.includes(voice.voiceURI))
+    hasFavorites && !showAllVoices
+      ? matchingVoices.filter((voice) => systemFavoriteIds.includes(voice.voiceURI))
       : matchingVoices;
+  const listedPiper = PIPER_VOICES.filter((voice) => voice.lang === spoken).filter(
+    (voice) => !hasFavorites || showAllVoices || piperFavoriteIds.length === 0 || piperFavoriteIds.includes(`piper:${voice.id}`),
+  );
   const selectedVoice = tts.voiceByLang[spoken] || tts.voiceURI;
   const spokenLabel = spoken === "fr" ? "Voix françaises" : "Voix anglaises";
 
@@ -515,7 +530,7 @@ export function Reader({ bookId, onBack }: ReaderProps) {
           {speechPhase === "playing" ? "❚❚" : speechPhase === "loading" ? "…" : "▶"}
         </button>
         <label className="tts-volume">
-          <span>Volume</span>
+          <span>{Math.round(tts.volume * 100)} %</span>
           <input
             type="range"
             min={0}
@@ -523,6 +538,7 @@ export function Reader({ bookId, onBack }: ReaderProps) {
             step={0.05}
             value={tts.volume}
             aria-label="Volume"
+            onPointerDown={(event) => event.stopPropagation()}
             onChange={(event) => updateTts({ volume: Number(event.target.value) })}
           />
         </label>
@@ -587,24 +603,26 @@ export function Reader({ bookId, onBack }: ReaderProps) {
             </header>
             <div className="sheet-body">
               <label className="voice-field">
-                <span>Vitesse</span>
+                <span>Vitesse {tts.rate.toLocaleString("fr-FR", { minimumFractionDigits: 1, maximumFractionDigits: 1 })}×</span>
                 <input
                   type="range"
                   min={0.7}
                   max={1.6}
                   step={0.1}
                   value={tts.rate}
+                  aria-label="Vitesse"
+                  onPointerDown={(event) => event.stopPropagation()}
                   onChange={(event) => updateTts({ rate: Number(event.target.value) })}
                 />
               </label>
               <div className="voice-field">
                 <span>{spokenLabel}</span>
-                {listedVoices.length === 0 ? (
+                {matchingVoices.length === 0 ? (
                   <p className="muted">Aucune voix {spoken === "fr" ? "française" : "anglaise"} sur cet appareil.</p>
-                ) : (
+                ) : listedVoices.length > 0 ? (
                   <ul className="voice-list">
                     {listedVoices.map((voice) => {
-                      const favorite = favoriteIds.includes(voice.voiceURI);
+                      const favorite = systemFavoriteIds.includes(voice.voiceURI);
                       const active = tts.engine === "system" && selectedVoice === voice.voiceURI;
                       return (
                         <li key={voice.voiceURI}>
@@ -628,8 +646,8 @@ export function Reader({ bookId, onBack }: ReaderProps) {
                       );
                     })}
                   </ul>
-                )}
-                {favoriteIds.length > 0 ? (
+                ) : null}
+                {hasFavorites ? (
                   <button type="button" className="text-button" onClick={() => setShowAllVoices((current) => !current)}>
                     {showAllVoices ? "Favoris seulement" : `Toutes les voix ${spoken === "fr" ? "françaises" : "anglaises"}`}
                   </button>
@@ -640,11 +658,20 @@ export function Reader({ bookId, onBack }: ReaderProps) {
               <section className="open-voices">
                 <h3>Pack Piper</h3>
                 <p className="muted">{PIPER_NOTE}</p>
-                {PIPER_VOICES.filter((voice) => voice.lang === spoken).map((voice) => {
+                {listedPiper.map((voice) => {
                   const ready = piperSaved.includes(voice.id);
                   const active = tts.engine === "piper" && tts.piperVoice === voice.id;
+                  const favorite = piperFavoriteIds.includes(`piper:${voice.id}`);
                   return (
                     <div className="voice-row" key={voice.id}>
+                      <button
+                        type="button"
+                        className="star"
+                        aria-label={favorite ? "Retirer des favoris" : "Ajouter aux favoris"}
+                        onClick={() => setFavorites(toggleFavoriteVoice(spoken, `piper:${voice.id}`))}
+                      >
+                        {favorite ? "★" : "☆"}
+                      </button>
                       <div>
                         <strong>{voice.name}</strong>
                         <small>

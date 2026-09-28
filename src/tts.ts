@@ -209,8 +209,14 @@ class PageSpeech {
   private resumeOnStatus: ((label: string | null) => void) | null = null;
   private resumeLang: VoiceLang = "fr";
   private pendingFinish: (() => void) | null = null;
-  private piperAudio: HTMLAudioElement | null = null;
-  private piperDone: (() => void) | null = null;
+  private sourceRates = new Map<AudioBufferSourceNode, number>();
+  private piperBuffers: AudioBuffer[] = [];
+  private piperParts: string[] = [];
+  private piperClock = 0;
+  private piperScheduleRate = 1;
+  private needsRestart = false;
+  private pendingVoiceText: string | null = null;
+  private systemRestart = 0;
 
   subscribe(listener: () => void) {
     this.listeners.add(listener);
@@ -228,16 +234,53 @@ class PageSpeech {
     this.phase = "idle";
     this.clearSystem();
     this.stopSources();
-    this.stopPiperAudio();
+    window.clearTimeout(this.systemRestart);
     this.resumePrefs = null;
     this.pendingFinish = null;
+    this.needsRestart = false;
+    this.pendingVoiceText = null;
     this.notify();
+  }
+
+  useVoice(prefs: TtsPrefs) {
+    if (!this.resumePrefs || this.phase === "idle") return;
+    if (voiceSignature(this.resumePrefs, this.resumeLang) === voiceSignature(prefs, this.resumeLang)) return;
+    const text = this.pendingVoiceText || this.remainingText();
+    this.pendingVoiceText = text;
+    this.resumePrefs = { ...prefs, volume: this.resumePrefs.volume, rate: this.resumePrefs.rate };
+    this.needsRestart = true;
+    this.token += 1;
+    this.clearSystem();
+    this.piperBuffers = [];
+    this.piperParts = [];
+    this.haltSources();
+    if (this.audio?.state === "running") void this.audio.suspend();
+    if (this.phase === "paused") return;
+    const snapshot = {
+      text,
+      prefs: this.resumePrefs,
+      lang: this.resumeLang,
+      onDone: this.resumeOnDone,
+      onStatus: this.resumeOnStatus,
+    };
+    this.needsRestart = false;
+    this.pendingVoiceText = null;
+    queueMicrotask(() => {
+      if (this.phase === "paused" || this.phase === "idle") return;
+      if (!snapshot.text || !snapshot.onDone || !snapshot.onStatus) return;
+      void this.play({
+        text: snapshot.text,
+        prefs: snapshot.prefs,
+        lang: snapshot.lang,
+        onDone: snapshot.onDone,
+        onStatus: snapshot.onStatus,
+      });
+    });
   }
 
   pause() {
     if (this.phase !== "playing") return;
-    if (this.resumePrefs?.engine === "piper") this.piperAudio?.pause();
-    else if (this.resumePrefs?.engine === "kokoro") void this.audio?.suspend();
+    if (this.resumePrefs?.engine === "piper" || this.resumePrefs?.engine === "kokoro") void this.audio?.suspend();
     else window.speechSynthesis?.pause();
     this.phase = "paused";
     this.notify();
@@ -251,19 +294,32 @@ class PageSpeech {
 
   resume() {
     if (this.phase !== "paused" || !this.resumePrefs || !this.resumeOnDone || !this.resumeOnStatus) return;
-    if (this.resumePrefs.engine === "piper") {
-      void this.piperAudio?.play();
-      this.phase = "playing";
-      this.notify();
+    if (this.needsRestart) {
+      const text = this.pendingVoiceText || this.remainingText();
+      const prefs = this.resumePrefs;
+      const onDone = this.resumeOnDone;
+      const onStatus = this.resumeOnStatus;
+      const lang = this.resumeLang;
+      this.needsRestart = false;
+      this.pendingVoiceText = null;
+      if (!text) {
+        this.phase = "idle";
+        this.notify();
+        onDone();
+        return;
+      }
+      void this.play({ text, prefs, lang, onDone, onStatus });
       return;
     }
-    if (this.resumePrefs.engine === "kokoro" && this.audio) {
-      void this.audio.resume();
+    if (this.resumePrefs.engine === "piper" || (this.resumePrefs.engine === "kokoro" && this.audio)) {
+      void this.audio?.resume();
       this.phase = "playing";
       this.notify();
-      const finish = this.pendingFinish;
-      this.pendingFinish = null;
-      finish?.();
+      if (this.resumePrefs.engine === "kokoro") {
+        const finish = this.pendingFinish;
+        this.pendingFinish = null;
+        finish?.();
+      }
       return;
     }
     const synth = window.speechSynthesis;
@@ -292,7 +348,29 @@ class PageSpeech {
   setVolume(volume: number) {
     if (this.resumePrefs) this.resumePrefs.volume = volume;
     if (this.gain) this.gain.gain.value = volume;
-    if (this.piperAudio) this.piperAudio.volume = volume;
+    this.restartSystemSoon();
+  }
+
+  setRate(rate: number) {
+    if (this.resumePrefs) this.resumePrefs.rate = rate;
+    if (
+      this.resumePrefs?.engine === "piper" &&
+      this.piperBuffers.length > 0 &&
+      this.audio &&
+      (this.phase === "playing" || this.phase === "paused")
+    ) {
+      const elapsed = Math.max(0, (this.audio.currentTime - this.piperClock) * this.piperScheduleRate);
+      this.schedulePiper(rate, elapsed, this.token);
+      return;
+    }
+    for (const [source, baked] of this.sourceRates) {
+      try {
+        source.playbackRate.value = rate / baked;
+      } catch {
+        /* source already finished */
+      }
+    }
+    this.restartSystemSoon();
   }
 
   async play({ text, prefs, lang, onDone, onStatus }: PlayOptions) {
@@ -322,8 +400,9 @@ class PageSpeech {
   }
 
   private unlockPiperAudio() {
+    const context = this.ensureAudio();
+    void context.resume();
     const audio = new Audio("data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=");
-    this.piperAudio = audio;
     void audio.play().catch(() => {});
   }
 
@@ -335,63 +414,99 @@ class PageSpeech {
     onStatus: (label: string | null) => void,
   ) {
     const parts = text.match(/[^.!?…]+[.!?…]+|[^.!?…]+$/g)?.map((part) => part.trim()).filter(Boolean) ?? [text];
-    this.phase = "playing";
-    this.notify();
-    for (const part of parts) {
-      await this.waitIfPaused(token);
+    this.piperParts = parts;
+    const context = this.ensureAudio();
+    const buffers: AudioBuffer[] = [];
+    for (const [index, part] of parts.entries()) {
       if (token !== this.token) return;
       const current = this.resumePrefs ?? prefs;
-      const blob = await synthesizePiper(part, current.piperVoice, current.rate, onStatus);
-      await this.waitIfPaused(token);
+      onStatus(`Préparation ${index + 1} / ${parts.length}`);
+      const blob = await synthesizePiper(part, current.piperVoice, 1, () => {});
       if (token !== this.token) return;
-      onStatus(null);
-      await this.playBlob(blob, current.volume, token);
+      const bytes = await blob.arrayBuffer();
+      buffers.push(await context.decodeAudioData(bytes.slice(0)));
     }
+    if (token !== this.token || buffers.length === 0) return;
+    await context.resume();
     if (token !== this.token) return;
-    this.phase = "idle";
+    onStatus(null);
+    const rate = this.resumePrefs?.rate ?? prefs.rate;
+    if (this.gain) this.gain.gain.value = this.resumePrefs?.volume ?? prefs.volume;
+    this.piperBuffers = buffers;
+    this.phase = "playing";
     this.notify();
-    onDone();
+    this.schedulePiper(rate, 0, token, onDone);
   }
 
-  private waitIfPaused(token: number) {
-    if (this.phase !== "paused" || token !== this.token) return Promise.resolve();
-    return new Promise<void>((resolve) => {
-      const stop = this.subscribe(() => {
-        if (this.phase !== "paused" || token !== this.token) {
-          stop();
-          resolve();
-        }
-      });
-    });
-  }
-
-  private playBlob(blob: Blob, volume: number, token: number) {
-    return new Promise<void>((resolve) => {
-      if (token !== this.token) {
-        resolve();
-        return;
+  private schedulePiper(rate: number, offset: number, token: number, onDone?: () => void) {
+    const context = this.audio;
+    if (!context) return;
+    this.haltSources();
+    let skip = offset;
+    let index = 0;
+    while (index < this.piperBuffers.length) {
+      const duration = this.piperBuffers[index].duration;
+      if (duration <= 0) {
+        index += 1;
+        continue;
       }
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audio.volume = volume;
-      this.piperAudio = audio;
-      const finish = () => {
-        URL.revokeObjectURL(url);
-        if (this.piperDone === finish) this.piperDone = null;
-        resolve();
+      if (skip < duration - 0.02) break;
+      skip -= duration;
+      index += 1;
+    }
+    const finish = onDone ?? this.resumeOnDone;
+    if (index >= this.piperBuffers.length) {
+      this.piperBuffers = [];
+      if (token !== this.token || !finish) return;
+      this.phase = "idle";
+      this.notify();
+      finish();
+      return;
+    }
+    const whenStart = context.currentTime + 0.03;
+    this.piperScheduleRate = rate;
+    this.piperClock = whenStart - offset / rate;
+    let when = whenStart;
+    let remaining = this.piperBuffers.length - index;
+    for (let cursor = index; cursor < this.piperBuffers.length; cursor += 1) {
+      const buffer = this.piperBuffers[cursor];
+      const bufferOffset = cursor === index ? Math.max(0, skip) : 0;
+      const source = context.createBufferSource();
+      source.buffer = buffer;
+      source.playbackRate.value = rate;
+      source.connect(this.gain ?? context.destination);
+      source.start(when, bufferOffset);
+      when += (buffer.duration - bufferOffset) / rate;
+      this.sources.push(source);
+      this.sourceRates.set(source, 1);
+      source.onended = () => {
+        remaining -= 1;
+        this.sources = this.sources.filter((item) => item !== source);
+        this.sourceRates.delete(source);
+        if (remaining > 0 || token !== this.token) return;
+        this.piperBuffers = [];
+        this.phase = "idle";
+        this.notify();
+        finish?.();
       };
-      this.piperDone = finish;
-      audio.onended = finish;
-      audio.onerror = finish;
-      void audio.play().catch(finish);
-    });
+    }
   }
 
-  private stopPiperAudio() {
-    this.piperAudio?.pause();
-    this.piperAudio = null;
-    this.piperDone?.();
-    this.piperDone = null;
+  private restartSystemSoon() {
+    if (this.resumePrefs?.engine !== "system" || this.phase !== "playing") return;
+    window.clearTimeout(this.systemRestart);
+    this.systemRestart = window.setTimeout(() => this.restartSystemNow(), 160);
+  }
+
+  private restartSystemNow() {
+    if (this.resumePrefs?.engine !== "system" || this.phase !== "playing" || !this.resumeOnDone) return;
+    const rest = (this.activeText.slice(this.spokenIndex).trim() || this.activeText).trim();
+    if (!rest) return;
+    this.token += 1;
+    this.clearSystem();
+    this.activeText = rest;
+    this.spokenIndex = 0;
+    this.playSystem(rest, this.resumePrefs, this.resumeLang, this.token, this.resumeOnDone);
   }
 
   private playSystem(text: string, prefs: TtsPrefs, lang: VoiceLang, token: number, onDone: () => void) {
@@ -424,7 +539,10 @@ class PageSpeech {
       if (synth.speaking && !synth.paused) synth.resume();
     }, 10000);
     synth.cancel();
-    synth.speak(utterance);
+    window.setTimeout(() => {
+      if (token !== this.token) return;
+      synth.speak(utterance);
+    }, 50);
     this.phase = "playing";
     this.notify();
   }
@@ -461,20 +579,23 @@ class PageSpeech {
     this.phase = "playing";
     this.notify();
     onStatus(null);
+    const baked = this.resumePrefs?.rate ?? prefs.rate;
     let nextAt = context.currentTime;
-    for await (const chunk of model.stream(text, { voice: prefs.kokoroVoice, speed: prefs.rate })) {
+    for await (const chunk of model.stream(text, { voice: prefs.kokoroVoice, speed: baked })) {
       if (token !== this.token) return;
       const samples = chunk.audio.audio;
       const buffer = context.createBuffer(1, samples.length, chunk.audio.sampling_rate);
       buffer.copyToChannel(samples, 0);
       const source = context.createBufferSource();
       source.buffer = buffer;
+      source.playbackRate.value = (this.resumePrefs?.rate ?? baked) / baked;
       source.connect(this.gain ?? context.destination);
       const start = Math.max(nextAt, context.currentTime + 0.05);
       source.start(start);
-      nextAt = start + buffer.duration;
+      nextAt = start + buffer.duration / source.playbackRate.value;
       pending += 1;
       this.sources.push(source);
+      this.sourceRates.set(source, baked);
       source.onended = () => {
         pending -= 1;
         this.sources = this.sources.filter((item) => item !== source);
@@ -496,13 +617,43 @@ class PageSpeech {
     return this.audio;
   }
 
+  private remainingText() {
+    if (this.resumePrefs?.engine === "piper" && this.piperParts.length > 0 && this.piperBuffers.length > 0) {
+      const rest = this.piperParts.slice(this.piperSentenceIndex()).join(" ").trim();
+      if (rest) return rest;
+    }
+    const rest = this.activeText.slice(this.spokenIndex).trim();
+    return rest || this.activeText.trim();
+  }
+
+  private piperSentenceIndex() {
+    if (!this.audio || this.piperBuffers.length === 0) return 0;
+    let skip = Math.max(0, (this.audio.currentTime - this.piperClock) * this.piperScheduleRate);
+    let index = 0;
+    while (index < this.piperBuffers.length && index < this.piperParts.length) {
+      const duration = this.piperBuffers[index].duration;
+      if (duration <= 0) {
+        index += 1;
+        continue;
+      }
+      if (skip < duration - 0.05) break;
+      skip -= duration;
+      index += 1;
+    }
+    return Math.min(index, Math.max(0, this.piperParts.length - 1));
+  }
+
   private clearSystem() {
     window.clearInterval(this.keepAlive);
     this.keepAlive = 0;
-    window.speechSynthesis?.cancel();
+    const synth = window.speechSynthesis;
+    if (!synth) return;
+    const wasPaused = synth.paused;
+    synth.cancel();
+    if (wasPaused) synth.resume();
   }
 
-  private stopSources() {
+  private haltSources() {
     for (const source of this.sources) {
       try {
         source.onended = null;
@@ -512,11 +663,22 @@ class PageSpeech {
       }
     }
     this.sources = [];
+    this.sourceRates.clear();
+  }
+
+  private stopSources() {
+    this.piperBuffers = [];
+    this.piperParts = [];
+    this.haltSources();
     if (this.audio?.state === "running") void this.audio.suspend();
   }
 }
 
 export const pageSpeech = new PageSpeech();
+
+function voiceSignature(prefs: TtsPrefs, lang: VoiceLang) {
+  return `${prefs.engine}|${prefs.piperVoice}|${prefs.kokoroVoice}|${prefs.voiceByLang[lang] || prefs.voiceURI}`;
+}
 
 function clamp(value: unknown, min: number, max: number, fallback: number) {
   const number = typeof value === "number" ? value : fallback;
