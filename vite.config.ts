@@ -1,11 +1,18 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
+import { viteStaticCopy } from "vite-plugin-static-copy";
 
 export default defineConfig({
   base: "/LNF-Reader/",
   plugins: [
     react(),
+    viteStaticCopy({
+      targets: [
+        { src: "node_modules/piper-tts-web/dist/onnx/*", dest: "onnx" },
+        { src: "node_modules/piper-tts-web/dist/piper/*", dest: "piper" },
+      ],
+    }),
     VitePWA({
       registerType: "autoUpdate",
       includeAssets: ["favicon.svg", "apple-touch-icon.png", "pwa-192.png", "pwa-512.png"],
@@ -33,7 +40,7 @@ export default defineConfig({
       },
       workbox: {
         globPatterns: ["**/*.{js,css,html,ico,png,svg,woff2,mjs}"],
-        globIgnores: ["**/*.wasm", "**/*onnx*", "**/kokoro-*.js"],
+        globIgnores: ["**/*.wasm", "**/*onnx*", "**/kokoro-*.js", "**/piper-tts-web*.js", "**/*.data"],
         maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
       },
     }),

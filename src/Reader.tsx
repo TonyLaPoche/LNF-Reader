@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import ePub, { EpubCFI, type Book, type Rendition } from "epubjs";
 import { getBook, readProgress, updateProgress } from "./db";
 import { isMobileOs } from "./install";
+import { PIPER_NOTE, PIPER_VOICES, downloadPiperVoice, downloadedPiperVoices, type PiperVoiceId } from "./piper";
 import { readPrefs, writeLastBook, writePrefs } from "./prefs";
 import {
   KOKORO_MODEL_SIZE,
@@ -83,7 +84,8 @@ export function Reader({ bookId, onBack }: ReaderProps) {
   const [voiceOpen, setVoiceOpen] = useState(false);
   const [ttsHint, setTtsHint] = useState<string | null>(null);
   const [savedVoices, setSavedVoices] = useState<OpenVoiceId[]>(() => downloadedVoices());
-  const [downloadingId, setDownloadingId] = useState<OpenVoiceId | null>(null);
+  const [piperSaved, setPiperSaved] = useState<PiperVoiceId[]>(() => downloadedPiperVoices());
+  const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const mobileOs = isMobileOs();
 
   useEffect(() => {
@@ -333,6 +335,20 @@ export function Reader({ bookId, onBack }: ReaderProps) {
       await downloadOpenVoice(id, setTtsHint);
       setSavedVoices(downloadedVoices());
       updateTts({ engine: "kokoro", kokoroVoice: id });
+      setTtsHint(null);
+    } catch (cause) {
+      setTtsHint(cause instanceof Error ? cause.message : "Téléchargement impossible.");
+    } finally {
+      setDownloadingId(null);
+    }
+  }
+
+  async function fetchPiper(id: PiperVoiceId) {
+    setDownloadingId(id);
+    try {
+      await downloadPiperVoice(id, setTtsHint);
+      setPiperSaved(downloadedPiperVoices());
+      updateTts({ engine: "piper", piperVoice: id });
       setTtsHint(null);
     } catch (cause) {
       setTtsHint(cause instanceof Error ? cause.message : "Téléchargement impossible.");
@@ -621,6 +637,33 @@ export function Reader({ bookId, onBack }: ReaderProps) {
                   <p className="muted">Marque une étoile pour ne garder que tes voix.</p>
                 )}
               </div>
+              <section className="open-voices">
+                <h3>Pack Piper</h3>
+                <p className="muted">{PIPER_NOTE}</p>
+                {PIPER_VOICES.filter((voice) => voice.lang === spoken).map((voice) => {
+                  const ready = piperSaved.includes(voice.id);
+                  const active = tts.engine === "piper" && tts.piperVoice === voice.id;
+                  return (
+                    <div className="voice-row" key={voice.id}>
+                      <div>
+                        <strong>{voice.name}</strong>
+                        <small>
+                          {voice.detail} · {voice.size}
+                        </small>
+                      </div>
+                      {ready ? (
+                        <button type="button" className={active ? "active" : ""} onClick={() => updateTts({ engine: "piper", piperVoice: voice.id })}>
+                          {active ? "Utilisée" : "Utiliser"}
+                        </button>
+                      ) : (
+                        <button type="button" disabled={downloadingId !== null} onClick={() => void fetchPiper(voice.id)}>
+                          {downloadingId === voice.id ? "…" : "Télécharger"}
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </section>
               {mobileOs && spoken === "en" ? (
                 <section className="open-voices">
                   <h3>Voix open source</h3>

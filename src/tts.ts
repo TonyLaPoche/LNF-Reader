@@ -1,3 +1,5 @@
+import { PIPER_VOICES, synthesizePiper, type PiperVoiceId } from "./piper";
+
 const PREFS_KEY = "lnf:tts";
 const DOWNLOADED_KEY = "lnf:kokoro-voices";
 const FAVORITES_KEY = "lnf:voice-favorites";
@@ -15,7 +17,7 @@ export const OPEN_VOICES = [
 ] as const;
 
 export type OpenVoiceId = (typeof OPEN_VOICES)[number]["id"];
-export type TtsEngine = "system" | "kokoro";
+export type TtsEngine = "system" | "kokoro" | "piper";
 export type TtsPhase = "idle" | "loading" | "playing" | "paused";
 
 export type VoiceLang = "fr" | "en";
@@ -27,6 +29,7 @@ export type TtsPrefs = {
   voiceByLang: Record<VoiceLang, string>;
   engine: TtsEngine;
   kokoroVoice: OpenVoiceId;
+  piperVoice: PiperVoiceId;
 };
 
 const DEFAULT_PREFS: TtsPrefs = {
@@ -36,6 +39,7 @@ const DEFAULT_PREFS: TtsPrefs = {
   voiceByLang: { fr: "", en: "" },
   engine: "system",
   kokoroVoice: "af_heart",
+  piperVoice: "fr_FR-siwis-medium",
 };
 
 type ProgressEvent = { status?: string; progress?: number; file?: string };
@@ -57,6 +61,8 @@ export function readTtsPrefs(): TtsPrefs {
       ? (parsed.kokoroVoice as OpenVoiceId)
       : DEFAULT_PREFS.kokoroVoice;
     const voiceByLang = parsed.voiceByLang ?? DEFAULT_PREFS.voiceByLang;
+    const piperMatch = PIPER_VOICES.find((voice) => voice.id === parsed.piperVoice);
+    const piperVoice = piperMatch?.id ?? DEFAULT_PREFS.piperVoice;
     return {
       volume: clamp(parsed.volume, 0, 1, DEFAULT_PREFS.volume),
       rate: clamp(parsed.rate, 0.7, 1.6, DEFAULT_PREFS.rate),
@@ -65,8 +71,9 @@ export function readTtsPrefs(): TtsPrefs {
         fr: typeof voiceByLang.fr === "string" ? voiceByLang.fr : "",
         en: typeof voiceByLang.en === "string" ? voiceByLang.en : "",
       },
-      engine: parsed.engine === "kokoro" ? "kokoro" : "system",
+      engine: parsed.engine === "kokoro" || parsed.engine === "piper" ? parsed.engine : "system",
       kokoroVoice,
+      piperVoice,
     };
   } catch {
     return { ...DEFAULT_PREFS };
@@ -202,6 +209,8 @@ class PageSpeech {
   private resumeOnStatus: ((label: string | null) => void) | null = null;
   private resumeLang: VoiceLang = "fr";
   private pendingFinish: (() => void) | null = null;
+  private piperAudio: HTMLAudioElement | null = null;
+  private piperDone: (() => void) | null = null;
 
   subscribe(listener: () => void) {
     this.listeners.add(listener);
@@ -219,6 +228,7 @@ class PageSpeech {
     this.phase = "idle";
     this.clearSystem();
     this.stopSources();
+    this.stopPiperAudio();
     this.resumePrefs = null;
     this.pendingFinish = null;
     this.notify();
@@ -226,18 +236,27 @@ class PageSpeech {
 
   pause() {
     if (this.phase !== "playing") return;
-    if (this.resumePrefs?.engine === "kokoro") void this.audio?.suspend();
+    if (this.resumePrefs?.engine === "piper") this.piperAudio?.pause();
+    else if (this.resumePrefs?.engine === "kokoro") void this.audio?.suspend();
     else window.speechSynthesis?.pause();
     this.phase = "paused";
     this.notify();
-    window.setTimeout(() => {
-      const synth = window.speechSynthesis;
-      if (this.phase === "paused" && synth?.speaking && !synth.paused) synth.cancel();
-    }, 250);
+    if (this.resumePrefs?.engine === "system") {
+      window.setTimeout(() => {
+        const synth = window.speechSynthesis;
+        if (this.phase === "paused" && synth?.speaking && !synth.paused) synth.cancel();
+      }, 250);
+    }
   }
 
   resume() {
     if (this.phase !== "paused" || !this.resumePrefs || !this.resumeOnDone || !this.resumeOnStatus) return;
+    if (this.resumePrefs.engine === "piper") {
+      void this.piperAudio?.play();
+      this.phase = "playing";
+      this.notify();
+      return;
+    }
     if (this.resumePrefs.engine === "kokoro" && this.audio) {
       void this.audio.resume();
       this.phase = "playing";
@@ -271,7 +290,9 @@ class PageSpeech {
   }
 
   setVolume(volume: number) {
+    if (this.resumePrefs) this.resumePrefs.volume = volume;
     if (this.gain) this.gain.gain.value = volume;
+    if (this.piperAudio) this.piperAudio.volume = volume;
   }
 
   async play({ text, prefs, lang, onDone, onStatus }: PlayOptions) {
@@ -286,7 +307,11 @@ class PageSpeech {
     this.phase = "loading";
     this.notify();
     try {
-      if (prefs.engine === "kokoro" && lang === "en") await this.playKokoro(text, prefs, token, onDone, onStatus);
+      const piperVoice = PIPER_VOICES.find((voice) => voice.id === prefs.piperVoice);
+      if (prefs.engine === "piper" && piperVoice?.lang === lang) {
+        this.unlockPiperAudio();
+        await this.playPiper(text, prefs, token, onDone, onStatus);
+      } else if (prefs.engine === "kokoro" && lang === "en") await this.playKokoro(text, prefs, token, onDone, onStatus);
       else this.playSystem(text, prefs, lang, token, onDone);
     } catch (error) {
       if (token !== this.token) return;
@@ -294,6 +319,79 @@ class PageSpeech {
       this.notify();
       onStatus(error instanceof Error ? error.message : "Lecture vocale impossible.");
     }
+  }
+
+  private unlockPiperAudio() {
+    const audio = new Audio("data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=");
+    this.piperAudio = audio;
+    void audio.play().catch(() => {});
+  }
+
+  private async playPiper(
+    text: string,
+    prefs: TtsPrefs,
+    token: number,
+    onDone: () => void,
+    onStatus: (label: string | null) => void,
+  ) {
+    const parts = text.match(/[^.!?…]+[.!?…]+|[^.!?…]+$/g)?.map((part) => part.trim()).filter(Boolean) ?? [text];
+    this.phase = "playing";
+    this.notify();
+    for (const part of parts) {
+      await this.waitIfPaused(token);
+      if (token !== this.token) return;
+      const current = this.resumePrefs ?? prefs;
+      const blob = await synthesizePiper(part, current.piperVoice, current.rate, onStatus);
+      await this.waitIfPaused(token);
+      if (token !== this.token) return;
+      onStatus(null);
+      await this.playBlob(blob, current.volume, token);
+    }
+    if (token !== this.token) return;
+    this.phase = "idle";
+    this.notify();
+    onDone();
+  }
+
+  private waitIfPaused(token: number) {
+    if (this.phase !== "paused" || token !== this.token) return Promise.resolve();
+    return new Promise<void>((resolve) => {
+      const stop = this.subscribe(() => {
+        if (this.phase !== "paused" || token !== this.token) {
+          stop();
+          resolve();
+        }
+      });
+    });
+  }
+
+  private playBlob(blob: Blob, volume: number, token: number) {
+    return new Promise<void>((resolve) => {
+      if (token !== this.token) {
+        resolve();
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      audio.volume = volume;
+      this.piperAudio = audio;
+      const finish = () => {
+        URL.revokeObjectURL(url);
+        if (this.piperDone === finish) this.piperDone = null;
+        resolve();
+      };
+      this.piperDone = finish;
+      audio.onended = finish;
+      audio.onerror = finish;
+      void audio.play().catch(finish);
+    });
+  }
+
+  private stopPiperAudio() {
+    this.piperAudio?.pause();
+    this.piperAudio = null;
+    this.piperDone?.();
+    this.piperDone = null;
   }
 
   private playSystem(text: string, prefs: TtsPrefs, lang: VoiceLang, token: number, onDone: () => void) {
