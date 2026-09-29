@@ -63,7 +63,7 @@ button, input {
 h1, h2 { margin: 0; font-weight: 600; }
 h1 { font-size: clamp(1.45rem, 7vw, 1.8rem); }
 
-.button, .reader-footer button, .tts-bar button, .resume {
+.button, .reader-footer button, .reader-settings button, .tts-bar button, .resume {
   border: 0;
   border-radius: 999px;
   background: #2a251f;
@@ -278,9 +278,62 @@ h1 { font-size: clamp(1.45rem, 7vw, 1.8rem); }
   overscroll-behavior: none;
 }
 
+@font-face {
+  font-family: "LNF Orbitron";
+  src: url("./assets/fonts/orbitron-700.woff2") format("woff2");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "LNF Rajdhani";
+  src: url("./assets/fonts/rajdhani-500.woff2") format("woff2");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
 .reader.theme-papier { background: #f7f1e6; color: #231c16; }
 .reader.theme-sepia { background: #f3e6d0; color: #3a2a1a; }
 .reader.theme-nuit { background: #1b1916; color: #ece6dc; }
+.reader.theme-cyber {
+  background-color: #07060f;
+  background-image:
+    linear-gradient(rgba(34, 231, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(34, 231, 255, 0.08) 1px, transparent 1px);
+  background-size: 22px 22px;
+  color: #c8fff6;
+  font-family: "LNF Rajdhani", "Segoe UI", sans-serif;
+}
+.reader.theme-cyber .reader-title strong,
+.reader.theme-cyber .reader-title small {
+  font-family: "LNF Orbitron", sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.reader.theme-cyber .reader-title small { color: #22e7ff; opacity: 1; }
+.reader.theme-cyber .setting-line > span {
+  font-family: "LNF Orbitron", sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #22e7ff;
+  opacity: 1;
+}
+.reader.theme-cyber .reader-bar { box-shadow: inset 0 -2px 0 #fcee0a; }
+.reader.theme-cyber .reader-footer { box-shadow: inset 0 1px 0 rgba(34, 231, 255, 0.7); }
+.reader.theme-cyber .stage-wrap::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(34, 231, 255, 0.045) 0 1px,
+    transparent 1px 4px
+  );
+}
 
 .reader-title { flex: 1; min-width: 0; }
 .reader-title strong, .reader-title small {
@@ -373,7 +426,43 @@ h1 { font-size: clamp(1.45rem, 7vw, 1.8rem); }
   font-size: 0.85rem;
 }
 
+.footer-cluster {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.reader-settings {
+  flex: none;
+  display: grid;
+  gap: 8px;
+  margin-inline: -16px;
+  padding: 10px 12px 2px;
+  background: inherit;
+}
+
+.setting-line {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.setting-line > span {
+  flex: none;
+  width: 3.2rem;
+  font-size: 0.75rem;
+  opacity: 0.65;
+}
+
+.reader-settings .tts-bar {
+  margin-inline: 0;
+  padding: 0;
+}
+
 .reader-footer button,
+.reader-settings button,
 .tts-bar button {
   flex: none;
   min-height: 44px;
@@ -384,6 +473,7 @@ h1 { font-size: clamp(1.45rem, 7vw, 1.8rem); }
 }
 
 .reader.theme-nuit .reader-footer button,
+.reader.theme-nuit .reader-settings button,
 .reader.theme-nuit .tts-bar button {
   background: #2e2a26;
   color: #f4eee6;
@@ -391,10 +481,35 @@ h1 { font-size: clamp(1.45rem, 7vw, 1.8rem); }
 }
 
 .reader-footer button.active,
+.reader-settings button.active,
 .tts-bar button.active,
+.reader.theme-nuit .reader-footer button.active,
+.reader.theme-nuit .reader-settings button.active,
+.reader.theme-nuit .tts-bar button.active,
 .voice-row button.active {
   background: #e8a87c;
   color: #24180f;
+  box-shadow: none;
+}
+
+.reader.theme-cyber .reader-footer button,
+.reader.theme-cyber .reader-settings button,
+.reader.theme-cyber .tts-bar button {
+  border-radius: 2px;
+  background: #12081c;
+  color: #fcee0a;
+  font-family: "LNF Orbitron", sans-serif;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  box-shadow: inset 0 0 0 1px #fcee0a;
+}
+
+.reader.theme-cyber .reader-footer button.active,
+.reader.theme-cyber .reader-settings button.active,
+.reader.theme-cyber .tts-bar button.active {
+  background: #fcee0a;
+  color: #120818;
   box-shadow: none;
 }
 

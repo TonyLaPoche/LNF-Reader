@@ -22,6 +22,7 @@ export function PdfReader({ bookId, onBack }: PdfReaderProps) {
   const [prefs, setPrefs] = useState<ReaderPrefs>(() => readPrefs());
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const pageRef = useRef(page);
   const sessionRef = useRef({ started: 0, pages: 0 });
   const viewRef = useRef<ImageView>({ scale: 1, x: 0, y: 0 });
@@ -59,7 +60,7 @@ export function PdfReader({ bookId, onBack }: PdfReaderProps) {
 
     return () => {
       const session = sessionRef.current;
-      trackReadingSession("pdf", (Date.now() - session.started) / 1000, session.pages, false, false);
+      trackReadingSession("pdf", (Date.now() - session.started) / 1000, session.pages, false, false, readPrefs().theme);
       cancelled = true;
       void pdfRef.current?.destroy();
       pdfRef.current = null;
@@ -114,6 +115,11 @@ export function PdfReader({ bookId, onBack }: PdfReaderProps) {
   useEffect(() => {
     writePrefs(prefs);
   }, [prefs]);
+
+  function savePrefs(next: ReaderPrefs) {
+    writePrefs(next);
+    setPrefs(next);
+  }
 
   useEffect(() => {
     const frame = frameRef.current;
@@ -196,37 +202,46 @@ export function PdfReader({ bookId, onBack }: PdfReaderProps) {
       {!ready && !error ? <p className="reader-status">Ouverture du PDF…</p> : null}
       {error ? <p className="banner">{error}</p> : null}
 
+      {settingsOpen ? (
+        <div className="reader-settings">
+          <div className="setting-line">
+            <span>Zoom</span>
+            <button
+              type="button"
+              onClick={() => savePrefs({ ...prefs, fontScale: Math.max(80, prefs.fontScale - 10) })}
+              aria-label="Réduire"
+            >
+              −
+            </button>
+            <button
+              type="button"
+              onClick={() => savePrefs({ ...prefs, fontScale: Math.min(400, prefs.fontScale + 10) })}
+              aria-label="Agrandir"
+            >
+              +
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       <footer className="reader-footer">
-        <button type="button" onClick={() => go(page - 1)} aria-label="Page précédente">
-          ‹
-        </button>
-        <span>{Math.round(percentage * 100)}%</span>
-        <button type="button" onClick={() => go(page + 1)} aria-label="Page suivante">
-          ›
-        </button>
+        <div className="footer-cluster">
+          <button type="button" onClick={() => go(page - 1)} aria-label="Page précédente">
+            ‹
+          </button>
+          <span>{Math.round(percentage * 100)}%</span>
+          <button type="button" onClick={() => go(page + 1)} aria-label="Page suivante">
+            ›
+          </button>
+        </div>
         <button
           type="button"
-          onClick={() =>
-            setPrefs((current) => ({
-              ...current,
-              fontScale: Math.max(80, current.fontScale - 10),
-            }))
-          }
-          aria-label="Réduire"
+          className={settingsOpen ? "active" : ""}
+          aria-expanded={settingsOpen}
+          aria-label="Réglages"
+          onClick={() => setSettingsOpen((open) => !open)}
         >
-          −
-        </button>
-        <button
-          type="button"
-          onClick={() =>
-            setPrefs((current) => ({
-              ...current,
-              fontScale: Math.min(400, current.fontScale + 10),
-            }))
-          }
-          aria-label="Agrandir"
-        >
-          +
+          Réglages
         </button>
       </footer>
     </main>

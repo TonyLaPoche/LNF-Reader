@@ -1,3 +1,4 @@
+import type { ReaderPrefs } from "./types";
 import posthog from "posthog-js";
 
 const POSTHOG_KEY = "phc_AxaMo4HXpE2mm9CeaXpV3cXwJWXmCbXDpXSwi9uQ4VeN";
@@ -69,6 +70,7 @@ export function trackReadingSession(
   pagesTurned: number,
   usedTts: boolean,
   usedTranslation: boolean,
+  theme: ReaderPrefs["theme"],
 ) {
   const duration = Math.max(0, Math.round(durationSeconds));
   if (duration < 1 && pagesTurned < 1) return;
@@ -78,6 +80,7 @@ export function trackReadingSession(
     pages_turned: pagesTurned,
     used_tts: usedTts,
     used_translation: usedTranslation,
+    theme,
   });
 }
 

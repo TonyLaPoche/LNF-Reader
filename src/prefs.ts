@@ -2,6 +2,7 @@ import type { BookFormat, ReaderPrefs } from "./types";
 
 const PREFS_KEY = "lnf:prefs";
 const LAST_BOOK_KEY = "lnf:last-book";
+const THEME_IDS: ReaderPrefs["theme"][] = ["papier", "sepia", "nuit", "cyber"];
 
 const DEFAULT_PREFS: ReaderPrefs = {
   fontScale: 100,
@@ -10,11 +11,19 @@ const DEFAULT_PREFS: ReaderPrefs = {
 
 export function readPrefs(): ReaderPrefs {
   const raw = localStorage.getItem(PREFS_KEY);
-  if (!raw) return DEFAULT_PREFS;
+  if (!raw) return { ...DEFAULT_PREFS };
   try {
-    return { ...DEFAULT_PREFS, ...(JSON.parse(raw) as Partial<ReaderPrefs>) };
+    const parsed = JSON.parse(raw) as Partial<ReaderPrefs>;
+    const theme = THEME_IDS.includes(parsed.theme as ReaderPrefs["theme"])
+      ? (parsed.theme as ReaderPrefs["theme"])
+      : DEFAULT_PREFS.theme;
+    const fontScale =
+      typeof parsed.fontScale === "number" && Number.isFinite(parsed.fontScale)
+        ? parsed.fontScale
+        : DEFAULT_PREFS.fontScale;
+    return { fontScale, theme };
   } catch {
-    return DEFAULT_PREFS;
+    return { ...DEFAULT_PREFS };
   }
 }
 

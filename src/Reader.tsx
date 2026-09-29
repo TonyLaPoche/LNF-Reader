@@ -28,6 +28,8 @@ import { applyImageView, trackpadSwipe, trackVerticalSwipe, trackZoomPan, type I
 import { MODEL_SIZE, TRANSLATION_NOTE, translateParagraphs } from "./translate";
 import { readTranslation, translationId, writeTranslation } from "./translationStore";
 import type { ReaderPrefs } from "./types";
+import orbitron700 from "./assets/fonts/orbitron-700.woff2?url";
+import rajdhani500 from "./assets/fonts/rajdhani-500.woff2?url";
 
 type TocItem = { label: string; href: string };
 
@@ -36,22 +38,56 @@ type ReaderProps = {
   onBack: () => void;
 };
 
-const READING = {
-  "line-height": "1.7",
-  "font-family": "Georgia, Iowan Old Style, Palatino, serif",
-  padding: "0.2em 7% 1.4em",
-};
+const THEME_OPTIONS: Array<{ id: ReaderPrefs["theme"]; label: string }> = [
+  { id: "papier", label: "papier" },
+  { id: "sepia", label: "sepia" },
+  { id: "nuit", label: "nuit" },
+  { id: "cyber", label: "Cyber" },
+];
 
-const THEMES: Record<ReaderPrefs["theme"], { body: Record<string, string> }> = {
-  papier: { body: { ...READING, background: "#f7f1e6", color: "#231c16" } },
-  sepia: { body: { ...READING, background: "#f3e6d0", color: "#3a2a1a" } },
-  nuit: { body: { ...READING, background: "#1b1916", color: "#ece6dc" } },
+const LOOKS: Record<
+  ReaderPrefs["theme"],
+  { background: string; color: string; heading: string; link: string; font: string; headingFont: string }
+> = {
+  papier: {
+    background: "#f7f1e6",
+    color: "#231c16",
+    heading: "#231c16",
+    link: "#8a4b2a",
+    font: "Georgia, Iowan Old Style, Palatino, serif",
+    headingFont: "Georgia, Iowan Old Style, Palatino, serif",
+  },
+  sepia: {
+    background: "#f3e6d0",
+    color: "#3a2a1a",
+    heading: "#3a2a1a",
+    link: "#8a4b2a",
+    font: "Georgia, Iowan Old Style, Palatino, serif",
+    headingFont: "Georgia, Iowan Old Style, Palatino, serif",
+  },
+  nuit: {
+    background: "#1b1916",
+    color: "#ece6dc",
+    heading: "#ece6dc",
+    link: "#e8a87c",
+    font: "Georgia, Iowan Old Style, Palatino, serif",
+    headingFont: "Georgia, Iowan Old Style, Palatino, serif",
+  },
+  cyber: {
+    background: "#07060f",
+    color: "#c8fff6",
+    heading: "#fcee0a",
+    link: "#22e7ff",
+    font: '"LNF Rajdhani", "Segoe UI", sans-serif',
+    headingFont: '"LNF Orbitron", "LNF Rajdhani", sans-serif',
+  },
 };
 
 export function Reader({ bookId, onBack }: ReaderProps) {
   const stageRef = useRef<HTMLDivElement>(null);
   const gestureRef = useRef<HTMLDivElement>(null);
   const renditionRef = useRef<Rendition | null>(null);
+  const themeRef = useRef<ReaderPrefs["theme"]>(readPrefs().theme);
   const bookRef = useRef<Book | null>(null);
   const [title, setTitle] = useState("Lecture");
   const [chapter, setChapter] = useState("");
@@ -59,6 +95,12 @@ export function Reader({ bookId, onBack }: ReaderProps) {
   const [toc, setToc] = useState<TocItem[]>([]);
   const [tocOpen, setTocOpen] = useState(false);
   const [prefs, setPrefs] = useState<ReaderPrefs>(() => readPrefs());
+  themeRef.current = prefs.theme;
+
+  function savePrefs(next: ReaderPrefs) {
+    writePrefs(next);
+    setPrefs(next);
+  }
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const [english, setEnglish] = useState(false);
@@ -76,7 +118,7 @@ export function Reader({ bookId, onBack }: ReaderProps) {
   const speakRef = useRef<() => void>(() => {});
   const cfiRef = useRef("");
   const bookLangRef = useRef("fr");
-  const sessionRef = useRef({ started: 0, pages: 0, seenLocation: false, tts: false, translation: false });
+  const sessionRef = useRef(beginSession());
   const [bookLang, setBookLang] = useState("fr");
   const [favorites, setFavorites] = useState(readFavoriteVoices);
   const [showAllVoices, setShowAllVoices] = useState(false);
@@ -84,6 +126,7 @@ export function Reader({ bookId, onBack }: ReaderProps) {
   const [speechPhase, setSpeechPhase] = useState(pageSpeech.phase);
   const [systemVoices, setSystemVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [voiceOpen, setVoiceOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [ttsHint, setTtsHint] = useState<string | null>(null);
   const [savedVoices, setSavedVoices] = useState<OpenVoiceId[]>(() => downloadedVoices());
   const [piperSaved, setPiperSaved] = useState<PiperVoiceId[]>(() => downloadedPiperVoices());
@@ -97,7 +140,7 @@ export function Reader({ bookId, onBack }: ReaderProps) {
 
     let cancelled = false;
     let saveTimer = 0;
-    sessionRef.current = { started: Date.now(), pages: 0, seenLocation: false, tts: false, translation: false };
+    sessionRef.current = beginSession();
     trackReaderOpened("epub");
     const imageZoom = { value: { scale: 1, x: 0, y: 0 } satisfies ImageView };
 
@@ -130,6 +173,9 @@ export function Reader({ bookId, onBack }: ReaderProps) {
         manager: "default",
       });
       renditionRef.current = rendition;
+      rendition.hooks.content.register((contents: { document?: Document }) => {
+        paintLook(contents.document, themeRef.current);
+      });
       applyLook(rendition, readPrefs());
 
       const saved = readProgress(bookId) ?? record.progress;
@@ -238,6 +284,7 @@ export function Reader({ bookId, onBack }: ReaderProps) {
         session.pages,
         session.tts,
         session.translation,
+        mainTheme(session),
       );
       stopJobRef.current = true;
       keepGoingRef.current = false;
@@ -256,10 +303,30 @@ export function Reader({ bookId, onBack }: ReaderProps) {
   }, [bookId]);
 
   useEffect(() => {
+    const session = sessionRef.current;
+    if (session.theme !== prefs.theme) accountTheme(session, prefs.theme);
+    writePrefs(prefs);
     const rendition = renditionRef.current;
     if (rendition) applyLook(rendition, prefs);
-    writePrefs(prefs);
+    const id = requestAnimationFrame(() => {
+      const node = stageRef.current;
+      if (!rendition || !node) return;
+      const rect = node.getBoundingClientRect();
+      rendition.resize(Math.floor(rect.width), Math.floor(rect.height));
+    });
+    return () => cancelAnimationFrame(id);
   }, [prefs]);
+
+  useEffect(() => {
+    const id = requestAnimationFrame(() => {
+      const rendition = renditionRef.current;
+      const node = stageRef.current;
+      if (!rendition || !node) return;
+      const rect = node.getBoundingClientRect();
+      rendition.resize(Math.floor(rect.width), Math.floor(rect.height));
+    });
+    return () => cancelAnimationFrame(id);
+  }, [settingsOpen]);
 
   function turn(direction: "prev" | "next") {
     const wasSpeaking = pageSpeech.phase === "playing" || pageSpeech.phase === "loading";
@@ -543,75 +610,97 @@ export function Reader({ bookId, onBack }: ReaderProps) {
       {job ? <p className="banner">{job}</p> : null}
       {error ? <p className="banner">{error}</p> : null}
 
-      <div className="tts-bar">
-        <button
-          type="button"
-          onClick={toggleSpeech}
-          aria-label={speechPhase === "playing" ? "Pause" : speechPhase === "paused" ? "Reprendre" : "Lire la page"}
-        >
-          {speechPhase === "playing" ? "❚❚" : speechPhase === "loading" ? "…" : "▶"}
-        </button>
-        <label className="tts-volume">
-          <span>{Math.round(tts.volume * 100)} %</span>
-          <input
-            type="range"
-            min={0}
-            max={1}
-            step={0.05}
-            value={tts.volume}
-            aria-label="Volume"
-            onPointerDown={(event) => event.stopPropagation()}
-            onChange={(event) => updateTts({ volume: Number(event.target.value) })}
-          />
-        </label>
-        {ttsHint ? <small className="tts-hint">{ttsHint}</small> : null}
-        <button type="button" onClick={() => setVoiceOpen(true)} aria-label="Options de voix">
-          Voix
-        </button>
-      </div>
+      {settingsOpen ? (
+        <div className="reader-settings">
+          <div className="setting-line">
+            <span>Texte</span>
+            <button
+              type="button"
+              onClick={() => savePrefs({ ...prefs, fontScale: Math.max(80, prefs.fontScale - 10) })}
+              aria-label="Réduire le texte"
+            >
+              A−
+            </button>
+            <button
+              type="button"
+              onClick={() => savePrefs({ ...prefs, fontScale: Math.min(160, prefs.fontScale + 10) })}
+              aria-label="Agrandir le texte"
+            >
+              A+
+            </button>
+          </div>
+          <div className="setting-line">
+            <span>Mode</span>
+            {THEME_OPTIONS.map((theme) => (
+              <button
+                key={theme.id}
+                type="button"
+                className={prefs.theme === theme.id ? "active" : ""}
+                onClick={() => savePrefs({ ...prefs, theme: theme.id })}
+              >
+                {theme.label}
+              </button>
+            ))}
+          </div>
+          <div className="tts-bar">
+            <button
+              type="button"
+              onClick={toggleSpeech}
+              aria-label={speechPhase === "playing" ? "Pause" : speechPhase === "paused" ? "Reprendre" : "Lire la page"}
+            >
+              {speechPhase === "playing" ? "❚❚" : speechPhase === "loading" ? "…" : "▶"}
+            </button>
+            <label className="tts-volume">
+              <span>{Math.round(tts.volume * 100)} %</span>
+              <input
+                type="range"
+                min={0}
+                max={1}
+                step={0.05}
+                value={tts.volume}
+                aria-label="Volume"
+                onPointerDown={(event) => event.stopPropagation()}
+                onChange={(event) => updateTts({ volume: Number(event.target.value) })}
+              />
+            </label>
+            <button type="button" onClick={() => setVoiceOpen(true)} aria-label="Options de voix">
+              Voix
+            </button>
+          </div>
+          {ttsHint ? <small className="tts-hint">{ttsHint}</small> : null}
+        </div>
+      ) : null}
 
       <footer className="reader-footer">
-        <button type="button" onClick={() => turn("prev")} aria-label="Page précédente">
-          ‹
-        </button>
-        <span>{Math.round(percentage * 100)}%</span>
-        <button type="button" onClick={() => turn("next")} aria-label="Page suivante">
-          ›
-        </button>
-        <button
-          type="button"
-          onClick={() =>
-            setPrefs((current) => ({
-              ...current,
-              fontScale: Math.max(80, current.fontScale - 10),
-            }))
-          }
-          aria-label="Réduire le texte"
-        >
-          A−
-        </button>
-        <button
-          type="button"
-          onClick={() =>
-            setPrefs((current) => ({
-              ...current,
-              fontScale: Math.min(160, current.fontScale + 10),
-            }))
-          }
-          aria-label="Agrandir le texte"
-        >
-          A+
-        </button>
-        {(["papier", "sepia", "nuit"] as const).map((theme) => (
-          <button
-            key={theme}
-            type="button"
-            className={prefs.theme === theme ? "active" : ""}
-            onClick={() => setPrefs((current) => ({ ...current, theme }))}
-          >
-            {theme}
+        <div className="footer-cluster">
+          <button type="button" onClick={() => turn("prev")} aria-label="Page précédente">
+            ‹
           </button>
-        ))}
+          <span>{Math.round(percentage * 100)}%</span>
+          <button type="button" onClick={() => turn("next")} aria-label="Page suivante">
+            ›
+          </button>
+        </div>
+        <div className="footer-cluster">
+          {speechPhase !== "idle" && !settingsOpen ? (
+            <button
+              type="button"
+              onClick={toggleSpeech}
+              aria-label={speechPhase === "playing" ? "Pause" : speechPhase === "paused" ? "Reprendre" : "Lire la page"}
+            >
+              {speechPhase === "playing" ? "❚❚" : speechPhase === "loading" ? "…" : "▶"}
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className={settingsOpen ? "active" : ""}
+            aria-expanded={settingsOpen}
+            aria-label="Réglages"
+            onClick={() => setSettingsOpen((open) => !open)}
+          >
+            Réglages
+          </button>
+        </div>
       </footer>
 
       {voiceOpen ? (
@@ -883,11 +972,104 @@ function chapterLabel(items: TocItem[], href: string): string {
   return match?.label ?? "";
 }
 
-function applyLook(rendition: Rendition, prefs: ReaderPrefs) {
-  for (const [name, rules] of Object.entries(THEMES)) {
-    rendition.themes.register(name, rules);
+function beginSession() {
+  const theme = readPrefs().theme;
+  return {
+    started: Date.now(),
+    pages: 0,
+    seenLocation: false,
+    tts: false,
+    translation: false,
+    theme,
+    themeSince: Date.now(),
+    themeMs: { papier: 0, sepia: 0, nuit: 0, cyber: 0 } as Record<ReaderPrefs["theme"], number>,
+  };
+}
+
+function accountTheme(session: ReturnType<typeof beginSession>, theme: ReaderPrefs["theme"]) {
+  const now = Date.now();
+  session.themeMs[session.theme] += Math.max(0, now - session.themeSince);
+  session.theme = theme;
+  session.themeSince = now;
+}
+
+function mainTheme(session: ReturnType<typeof beginSession>): ReaderPrefs["theme"] {
+  accountTheme(session, session.theme);
+  let best: ReaderPrefs["theme"] = session.theme;
+  let max = -1;
+  for (const name of ["papier", "sepia", "nuit", "cyber"] as const) {
+    if (session.themeMs[name] > max) {
+      max = session.themeMs[name];
+      best = name;
+    }
   }
-  rendition.themes.select(prefs.theme);
+  return best;
+}
+
+function applyLook(rendition: Rendition, prefs: ReaderPrefs) {
+  const contents =
+    (rendition as unknown as { getContents?: () => Array<{ document?: Document }> }).getContents?.() ?? [];
+  for (const content of contents) paintLook(content.document, prefs.theme);
   rendition.themes.fontSize(`${prefs.fontScale}%`);
-  rendition.themes.override("line-height", "1.7");
+}
+
+function paintLook(doc: Document | undefined, theme: ReaderPrefs["theme"]) {
+  if (!doc?.head) return;
+  for (const name of ["default", "papier", "sepia", "nuit", "cyber"]) {
+    doc.getElementById(`epubjs-inserted-css-${name}`)?.remove();
+  }
+  let style = doc.getElementById("lnf-look");
+  if (!style) {
+    style = doc.createElement("style");
+    style.id = "lnf-look";
+    doc.head.appendChild(style);
+  }
+  const look = LOOKS[theme];
+  const faces = theme === "cyber" ? cyberFaces() : "";
+  style.textContent = `
+    ${faces}
+    html, body {
+      background: ${look.background} !important;
+      color: ${look.color} !important;
+      line-height: 1.65 !important;
+      font-family: ${look.font} !important;
+      font-weight: ${theme === "cyber" ? 500 : 400} !important;
+      letter-spacing: ${theme === "cyber" ? "0.03em" : "0"} !important;
+    }
+    p, li, div, span, blockquote, td, figcaption, dd, dt {
+      color: ${look.color} !important;
+      font-family: ${look.font} !important;
+      font-weight: ${theme === "cyber" ? 500 : 400} !important;
+      letter-spacing: ${theme === "cyber" ? "0.03em" : "0"} !important;
+    }
+    h1, h2, h3, h4, h5, h6 {
+      color: ${look.heading} !important;
+      font-family: ${look.headingFont} !important;
+      font-weight: ${theme === "cyber" ? 700 : 600} !important;
+      letter-spacing: ${theme === "cyber" ? "0.08em" : "0"} !important;
+      text-shadow: ${theme === "cyber" ? "0 0 16px rgba(252, 238, 10, 0.45)" : "none"};
+    }
+    a, a:link, a:visited { color: ${look.link} !important; }
+    ::selection { background: ${look.heading}; color: ${look.background}; }
+  `;
+}
+
+function cyberFaces(): string {
+  const file = (href: string) => new URL(href, window.location.origin).href;
+  return `
+    @font-face {
+      font-family: "LNF Orbitron";
+      src: url("${file(orbitron700)}") format("woff2");
+      font-weight: 700;
+      font-style: normal;
+      font-display: swap;
+    }
+    @font-face {
+      font-family: "LNF Rajdhani";
+      src: url("${file(rajdhani500)}") format("woff2");
+      font-weight: 500;
+      font-style: normal;
+      font-display: swap;
+    }
+  `;
 }

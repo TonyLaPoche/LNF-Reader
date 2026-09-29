@@ -28,5 +28,5 @@ export type BookSummary = Omit<BookRecord, "data">;
 
 export type ReaderPrefs = {
   fontScale: number;
-  theme: "papier" | "sepia" | "nuit";
+  theme: "papier" | "sepia" | "nuit" | "cyber";
 };
