@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { trackPageview } from "./analytics";
 import { Library } from "./Library";
 import { PdfReader } from "./PdfReader";
 import { Reader } from "./Reader";
@@ -15,6 +16,11 @@ const libraryRoute: Route = { name: "library" };
 export function App() {
   const [route, setRoute] = useState<Route>(libraryRoute);
   const lastBook = readLastBook();
+
+  useEffect(() => {
+    const screen = route.name === "reader" ? `reader/${route.format}` : route.name;
+    trackPageview(screen);
+  }, [route]);
 
   useEffect(() => {
     history.replaceState(libraryRoute, "");

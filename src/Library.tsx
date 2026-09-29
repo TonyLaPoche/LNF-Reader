@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { trackLibrarySize } from "./analytics";
 import { deleteBook, listBooks, markBookRead, markBookUnread } from "./db";
 import { isInstalled, isIos, promptInstall, subscribeInstall } from "./install";
 import { bookSize, formatSize, groupSeries, volumeLabel, type SeriesGroup } from "./series";
@@ -35,6 +36,7 @@ export function Library({ seriesKey, onOpenSeries, onBack, onOpen }: LibraryProp
       return urls;
     });
     setBusy(false);
+    return next.length;
   }
 
   useEffect(() => subscribeInstall(() => setInstalled(isInstalled())), []);
@@ -55,7 +57,7 @@ export function Library({ seriesKey, onOpenSeries, onBack, onOpen }: LibraryProp
   }
 
   useEffect(() => {
-    void refresh();
+    void refresh().then((count) => trackLibrarySize(count));
     return () => {
       setCovers((current) => {
         for (const url of Object.values(current)) URL.revokeObjectURL(url);
@@ -75,7 +77,8 @@ export function Library({ seriesKey, onOpenSeries, onBack, onOpen }: LibraryProp
         setImporting(`${index + 1} / ${files.length} · ${file.name}`);
         lastId = await importBook(file);
       }
-      await refresh();
+      const count = await refresh();
+      trackLibrarySize(count);
       const imported = (await listBooks()).find((book) => book.id === lastId);
       if (imported) {
         const group = groupSeries([imported])[0];

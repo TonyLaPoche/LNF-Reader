@@ -1,4 +1,5 @@
 import ePub from "epubjs";
+import { trackBookImported } from "./analytics";
 import { getBook, saveBook } from "./db";
 import { openPdf } from "./pdf";
 import { parseRelease } from "./series";
@@ -28,6 +29,7 @@ export async function importBook(file: File): Promise<string> {
     cover: meta.cover ?? existing?.cover ?? null,
     progress: existing?.progress ?? null,
   });
+  if (!existing) trackBookImported(format);
   return id;
 }
 

@@ -1,3 +1,5 @@
+import { trackPwaInstalled } from "./analytics";
+
 type BeforeInstallPromptEvent = Event & {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
@@ -20,6 +22,7 @@ if (typeof window !== "undefined") {
   window.addEventListener("appinstalled", () => {
     deferred = null;
     installedFlag = true;
+    trackPwaInstalled();
     notify();
   });
 }

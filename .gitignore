@@ -1,5 +1,6 @@
 node_modules
 dist
+.posthog-wizard-cache
 .DS_Store
 *.local
 .vite

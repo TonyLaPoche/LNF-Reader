@@ -14,6 +14,7 @@
     "kokoro-js": "^1.2.1",
     "pdfjs-dist": "^5.7.284",
     "piper-tts-web": "^1.1.2",
+    "posthog-js": "^1.434.18",
     "react": "^19.1.0",
     "react-dom": "^19.1.0"
   },
