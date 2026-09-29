@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import ePub, { EpubCFI, type Book, type Rendition } from "epubjs";
+import { trackReaderFailed, trackReaderOpened, trackReadingSession, trackTranslationStarted, trackTtsStarted } from "./analytics";
 import { getBook, readProgress, updateProgress } from "./db";
 import { isMobileOs } from "./install";
 import { PIPER_NOTE, PIPER_VOICES, downloadPiperVoice, downloadedPiperVoices, type PiperVoiceId } from "./piper";
@@ -75,6 +76,7 @@ export function Reader({ bookId, onBack }: ReaderProps) {
   const speakRef = useRef<() => void>(() => {});
   const cfiRef = useRef("");
   const bookLangRef = useRef("fr");
+  const sessionRef = useRef({ started: 0, pages: 0, seenLocation: false, tts: false, translation: false });
   const [bookLang, setBookLang] = useState("fr");
   const [favorites, setFavorites] = useState(readFavoriteVoices);
   const [showAllVoices, setShowAllVoices] = useState(false);
@@ -95,6 +97,8 @@ export function Reader({ bookId, onBack }: ReaderProps) {
 
     let cancelled = false;
     let saveTimer = 0;
+    sessionRef.current = { started: Date.now(), pages: 0, seenLocation: false, tts: false, translation: false };
+    trackReaderOpened("epub");
     const imageZoom = { value: { scale: 1, x: 0, y: 0 } satisfies ImageView };
 
     async function open() {
@@ -135,6 +139,8 @@ export function Reader({ bookId, onBack }: ReaderProps) {
         const label = chapterLabel(items, href);
         const cfi = start?.cfi;
         if (!cfi) return;
+        if (sessionRef.current.seenLocation) sessionRef.current.pages += 1;
+        else sessionRef.current.seenLocation = true;
         cfiRef.current = cfi;
         const nextPercentage = start.percentage || 0;
         setChapter(label);
@@ -181,6 +187,7 @@ export function Reader({ bookId, onBack }: ReaderProps) {
 
     void open().catch((cause: unknown) => {
       if (!cancelled) {
+        trackReaderFailed("epub");
         setError(cause instanceof Error ? cause.message : "Lecture impossible.");
       }
     });
@@ -224,6 +231,14 @@ export function Reader({ bookId, onBack }: ReaderProps) {
       : undefined;
 
     return () => {
+      const session = sessionRef.current;
+      trackReadingSession(
+        "epub",
+        (Date.now() - session.started) / 1000,
+        session.pages,
+        session.tts,
+        session.translation,
+      );
       stopJobRef.current = true;
       keepGoingRef.current = false;
       pageSpeech.stop();
@@ -334,6 +349,8 @@ export function Reader({ bookId, onBack }: ReaderProps) {
       return;
     }
     keepGoingRef.current = true;
+    sessionRef.current.tts = true;
+    trackTtsStarted(readTtsPrefs().engine);
     speakCurrent();
   }
 
@@ -425,6 +442,8 @@ export function Reader({ bookId, onBack }: ReaderProps) {
     const href = hrefRef.current || spineRef.current[0];
     if (!href) return;
     stopJobRef.current = false;
+    sessionRef.current.translation = true;
+    trackTranslationStarted("chapter");
     setOfferOpen(false);
     setJob("Préparation…");
     try {
@@ -439,6 +458,8 @@ export function Reader({ bookId, onBack }: ReaderProps) {
   async function translateBook() {
     const hrefs = spineRef.current;
     stopJobRef.current = false;
+    sessionRef.current.translation = true;
+    trackTranslationStarted("book");
     setOfferOpen(false);
     try {
       for (const [index, href] of hrefs.entries()) {
@@ -464,6 +485,7 @@ export function Reader({ bookId, onBack }: ReaderProps) {
         return;
       }
       frenchModeRef.current = true;
+      sessionRef.current.translation = true;
       setFrench(saved.paragraphs);
       setOfferOpen(false);
     });

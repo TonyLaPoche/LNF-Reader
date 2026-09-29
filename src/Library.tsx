@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { trackLibrarySize } from "./analytics";
+import { trackImportFailed, trackLibrarySize } from "./analytics";
 import { deleteBook, listBooks, markBookRead, markBookUnread } from "./db";
 import { isInstalled, isIos, promptInstall, subscribeInstall } from "./install";
 import { bookSize, formatSize, groupSeries, volumeLabel, type SeriesGroup } from "./series";
@@ -85,7 +85,9 @@ export function Library({ seriesKey, onOpenSeries, onBack, onOpen }: LibraryProp
         if (group) onOpenSeries(group.key);
       }
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : "Import impossible.");
+      const message = cause instanceof Error ? cause.message : "Import impossible.";
+      trackImportFailed(message.startsWith("Seuls les fichiers") ? "format" : "read");
+      setError(message);
       await refresh();
     } finally {
       setImporting(null);

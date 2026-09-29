@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { PDFDocumentProxy } from "pdfjs-dist";
+import { trackReaderFailed, trackReaderOpened, trackReadingSession } from "./analytics";
 import { getBook, readProgress, updateProgress } from "./db";
 import { openPdf } from "./pdf";
 import { readPrefs, writeLastBook, writePrefs } from "./prefs";
@@ -22,12 +23,15 @@ export function PdfReader({ bookId, onBack }: PdfReaderProps) {
   const [error, setError] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
   const pageRef = useRef(page);
+  const sessionRef = useRef({ started: 0, pages: 0 });
   const viewRef = useRef<ImageView>({ scale: 1, x: 0, y: 0 });
   pageRef.current = page;
 
   useEffect(() => {
     writeLastBook(bookId, "pdf");
     let cancelled = false;
+    sessionRef.current = { started: Date.now(), pages: 0 };
+    trackReaderOpened("pdf");
 
     async function open() {
       const record = await getBook(bookId);
@@ -47,10 +51,15 @@ export function PdfReader({ bookId, onBack }: PdfReaderProps) {
     }
 
     void open().catch((cause: unknown) => {
-      if (!cancelled) setError(cause instanceof Error ? cause.message : "Lecture impossible.");
+      if (!cancelled) {
+        trackReaderFailed("pdf");
+        setError(cause instanceof Error ? cause.message : "Lecture impossible.");
+      }
     });
 
     return () => {
+      const session = sessionRef.current;
+      trackReadingSession("pdf", (Date.now() - session.started) / 1000, session.pages, false, false);
       cancelled = true;
       void pdfRef.current?.destroy();
       pdfRef.current = null;
@@ -150,6 +159,7 @@ export function PdfReader({ bookId, onBack }: PdfReaderProps) {
     if (!pdf) return;
     const target = clampPage(next, pdf.numPages);
     if (target === pageRef.current) return;
+    if (target > pageRef.current) sessionRef.current.pages += target - pageRef.current;
     playPageTurn(frameRef.current, target > pageRef.current ? "next" : "prev");
     setPage(target);
   }
